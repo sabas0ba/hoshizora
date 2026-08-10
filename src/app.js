@@ -20,6 +20,13 @@
   };
   function simTime() { return state.baseTime + state.offsetMin * 60000; }
 
+  var target = null;   // 検索で選択中の天体 {type, ...}
+  var anim = null;     // 3D 視線移動アニメーション
+  var gyro = {         // 方位センサー
+    active: false, hasData: false, gotAbs: false, listening: false,
+    a: 0, b: 0, g: 0, offset: 0
+  };
+
   // ================= 恒星データ展開 =================
   var N = PLANET_DATA.starCount;
   var starRA = new Float64Array(N), starDec = new Float64Array(N);
@@ -183,6 +190,7 @@
     if (state.show.planets) drawPlanets2d();
     if (state.show.sunMoon) drawSunMoon2d();
     if (state.show.satellites) drawSats2d(nightF);
+    if (target) drawTarget2d();
     ctx.restore();
 
     // 地平リングと方位
@@ -381,6 +389,24 @@
         ctx.fillText(s.name.split(" ")[0], p[0] + 6, p[1] + 3);
       }
     }
+  }
+
+  // 検索ターゲットのマーカー (2D)
+  function drawTarget2d() {
+    var ti = targetInfo();
+    if (!ti) return;
+    var below = ti.alt < 0;
+    var xy = proj2d(Math.max(ti.alt, 0), ti.az);
+    var pulse = 3 * Math.sin(performance.now() / 220);
+    ctx.strokeStyle = below ? "rgba(230,180,34,0.55)" : "#e6b422";
+    ctx.lineWidth = 2;
+    if (below) ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.arc(xy[0], xy[1], 14 + pulse, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(xy[0], xy[1], 4, 0, Math.PI * 2); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.font = "bold 12px sans-serif"; ctx.textAlign = "center";
+    ctx.fillStyle = "#e6b422";
+    ctx.fillText(ti.name + (below ? " (地平線下)" : ""), xy[0], xy[1] - 22 - pulse);
   }
 
   // ================= 3D ビュー =================
@@ -800,14 +826,50 @@
     three.camera.updateProjectionMatrix();
   }
 
+  // 端末姿勢 → カメラ姿勢 (three.js DeviceOrientationControls と同等の変換)
+  var _gyroZee = null, _gyroEuler = null, _gyroQ0 = null, _gyroQ1 = null,
+    _gyroQYaw = null, _gyroYAxis = null, _gyroQEps = null;
+  function setGyroQuat(q) {
+    if (!_gyroZee) {
+      _gyroZee = new THREE.Vector3(0, 0, 1);
+      _gyroEuler = new THREE.Euler();
+      _gyroQ0 = new THREE.Quaternion();
+      _gyroQ1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5));
+      _gyroQYaw = new THREE.Quaternion();
+      _gyroYAxis = new THREE.Vector3(0, 1, 0);
+      _gyroQEps = new THREE.Quaternion()
+        .setFromAxisAngle(new THREE.Vector3(1, 0, 0), 2e-4);
+    }
+    var orient = 0;
+    if (window.screen && window.screen.orientation && isFinite(window.screen.orientation.angle)) {
+      orient = window.screen.orientation.angle;
+    } else if (isFinite(window.orientation)) {
+      orient = window.orientation;
+    }
+    _gyroEuler.set(gyro.b, gyro.a, -gyro.g, "YXZ");
+    q.setFromEuler(_gyroEuler);
+    q.multiply(_gyroQ1);
+    q.multiply(_gyroQ0.setFromAxisAngle(_gyroZee, -orient * D2R));
+    _gyroQYaw.setFromAxisAngle(_gyroYAxis, -gyro.offset * D2R);
+    q.premultiply(_gyroQYaw);
+    // 仰角が厳密に 0 (視線が地面と完全平行) の退化姿勢を避けるため、
+    // カメラローカル X 軸まわりに ~0.01° の微小回転を常時加える
+    q.multiply(_gyroQEps);
+  }
+
   function render3d() {
-    var yaw = three.yaw * D2R, pitch = three.pitch * D2R;
-    var target = new THREE.Vector3(
-      Math.cos(pitch) * Math.sin(yaw),
-      Math.sin(pitch),
-      -Math.cos(pitch) * Math.cos(yaw)
-    );
-    three.camera.lookAt(target);
+    if (gyro.active && gyro.hasData) {
+      setGyroQuat(three.camera.quaternion);
+    } else {
+      var yaw = three.yaw * D2R, pitch = three.pitch * D2R;
+      var tgt = new THREE.Vector3(
+        Math.cos(pitch) * Math.sin(yaw),
+        Math.sin(pitch),
+        -Math.cos(pitch) * Math.cos(yaw)
+      );
+      three.camera.lookAt(tgt);
+    }
+    updateTargetMarker3d();
     three.renderer.render(three.scene, three.camera);
   }
 
@@ -825,9 +887,14 @@
         var dx = e.clientX - p.x, dy = e.clientY - p.y;
         if (Math.abs(dx) + Math.abs(dy) > 3) p.moved = true;
         var scale = three.camera.fov / el.clientHeight;
-        three.yaw -= dx * scale;
-        three.pitch += dy * scale;
-        three.pitch = Math.max(-30, Math.min(89.5, three.pitch));
+        if (gyro.active) {
+          gyro.offset -= dx * scale;   // センサー動作中は方位補正のみ
+        } else {
+          anim = null;
+          three.yaw -= dx * scale;
+          three.pitch += dy * scale;
+          three.pitch = Math.max(-30, Math.min(89.5, three.pitch));
+        }
         p.x = e.clientX; p.y = e.clientY;
         dirty = true;
       } else if (ids.length === 2) {
@@ -943,6 +1010,323 @@
     if (best) showObjInfo(best, x, y);
   }
 
+  // ================= 検索ターゲット =================
+  function targetInfo() {
+    if (!target) return null;
+    var h;
+    switch (target.type) {
+      case "star":
+        h = horizAllSky(starRA[target.i], starDec[target.i]);
+        return { alt: h.alt, az: h.az, name: target.name };
+      case "const":
+        h = horizAllSky(target.ra, target.dec);
+        return { alt: h.alt, az: h.az, name: target.name };
+      case "planet":
+        for (var i = 0; i < A.planets.length; i++) {
+          if (A.planets[i].name === target.key) {
+            return { alt: A.planets[i].h.alt, az: A.planets[i].h.az, name: target.name };
+          }
+        }
+        return null;
+      case "sun": return { alt: A.sunH.alt, az: A.sunH.az, name: "太陽" };
+      case "moon": return { alt: A.moonH.alt, az: A.moonH.az, name: "月" };
+      case "sat":
+        var la = satLookAngles(sats[target.i].rec, new Date(simTime()));
+        if (!la) return null;
+        return { alt: la.alt, az: la.az, name: target.name };
+    }
+    return null;
+  }
+
+  function updateTargetMarker3d() {
+    var arrow = document.getElementById("dirarrow");
+    if (!three.ready) return;
+    if (!three.targetRing) {
+      var c = document.createElement("canvas");
+      c.width = c.height = 64;
+      var cc = c.getContext("2d");
+      cc.strokeStyle = "#e6b422"; cc.lineWidth = 4;
+      cc.beginPath(); cc.arc(32, 32, 24, 0, Math.PI * 2); cc.stroke();
+      cc.beginPath(); cc.arc(32, 32, 6, 0, Math.PI * 2); cc.stroke();
+      three.targetRing = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false
+      }));
+      three.scene.add(three.targetRing);
+      three.targetLabel = null;
+    }
+    var ti = target ? targetInfo() : null;
+    if (!ti) {
+      three.targetRing.visible = false;
+      if (three.targetLabel) three.targetLabel.visible = false;
+      arrow.style.display = "none";
+      return;
+    }
+    var pos = horizToWorld(ti.alt, ti.az, 820);
+    var pulse = 1 + 0.18 * Math.sin(performance.now() / 220);
+    three.targetRing.visible = true;
+    three.targetRing.position.copy(pos);
+    three.targetRing.scale.set(46 * pulse, 46 * pulse, 1);
+    if (!three.targetLabel || three.targetLabelText !== ti.name) {
+      if (three.targetLabel) three.scene.remove(three.targetLabel);
+      three.targetLabel = makeTextSprite(ti.name, "rgba(230,180,34,0.95)", 24);
+      three.targetLabelText = ti.name;
+      three.scene.add(three.targetLabel);
+    }
+    three.targetLabel.visible = true;
+    three.targetLabel.position.copy(horizToWorld(ti.alt + 4.5, ti.az, 820));
+    // 画面外なら方向矢印
+    var v = pos.clone().normalize()
+      .applyQuaternion(three.camera.quaternion.clone().invert());
+    var ang = Math.acos(Math.max(-1, Math.min(1, -v.z))) * R2D;
+    if (ang > three.camera.fov * 0.55) {
+      var sa = Math.atan2(-v.y, v.x); // CSS座標系 (y下向き) の角度
+      arrow.style.display = "block";
+      arrow.firstElementChild.style.transform =
+        "rotate(" + sa + "rad) translateX(110px) translateY(-13px)";
+    } else {
+      arrow.style.display = "none";
+    }
+  }
+
+  // 3D 視線移動アニメーション
+  function startGoTo(ti) {
+    if (!three.ready || gyro.active) return;
+    var toPitch = Math.max(-25, Math.min(89, ti.alt));
+    var cur = Astro.norm360(three.yaw % 360);
+    var d = ti.az - cur;
+    while (d > 180) d -= 360;
+    while (d < -180) d += 360;
+    anim = {
+      t0: performance.now(), dur: 900,
+      fy: three.yaw, fp: three.pitch,
+      ty: three.yaw + d, tp: toPitch
+    };
+  }
+
+  // ================= 検索 =================
+  var STAR_ALIASES = {
+    "シリウス": "Sirius", "カノープス": "Canopus", "アークトゥルス": "Arcturus",
+    "ベガ": "Vega", "織姫": "Vega", "カペラ": "Capella", "リゲル": "Rigel",
+    "プロキオン": "Procyon", "ベテルギウス": "Betelgeuse", "アケルナル": "Achernar",
+    "アルタイル": "Altair", "彦星": "Altair", "アルデバラン": "Aldebaran",
+    "スピカ": "Spica", "アンタレス": "Antares", "ポルックス": "Pollux",
+    "フォーマルハウト": "Fomalhaut", "デネブ": "Deneb", "レグルス": "Regulus",
+    "北極星": "Polaris", "ポラリス": "Polaris", "カストル": "Castor",
+    "アルゴル": "Algol", "ミザール": "Mizar", "アルビレオ": "Albireo",
+    "ミラ": "Mira", "コルカロリ": "Cor Caroli", "デネボラ": "Denebola"
+  };
+  function normQuery(s) {
+    return s.toLowerCase().replace(/[ァ-ヶ]/g, function (c) {
+      return String.fromCharCode(c.charCodeAt(0) - 0x60);
+    }).replace(/[\s　]+/g, "");
+  }
+  var catalog = null;
+  function buildCatalog() {
+    if (catalog) return;
+    catalog = [];
+    var properToJa = {};
+    for (var ja in STAR_ALIASES) {
+      if (!properToJa[STAR_ALIASES[ja]]) properToJa[STAR_ALIASES[ja]] = ja;
+    }
+    catalog.push({ type: "sun", disp: "太陽", keys: ["たいよう", "sun", "太陽"], pri: 0 });
+    catalog.push({ type: "moon", disp: "月", keys: ["つき", "moon", "月"], pri: 0 });
+    var latinPlanets = {
+      Mercury: "mercury", Venus: "venus", Mars: "mars", Jupiter: "jupiter",
+      Saturn: "saturn", Uranus: "uranus", Neptune: "neptune"
+    };
+    A.planets.forEach(function (p) {
+      catalog.push({ type: "planet", key: p.name, disp: p.ja, keys: [normQuery(p.ja), latinPlanets[p.name], p.ja], pri: 0 });
+    });
+    sats.forEach(function (s, i) {
+      var keys = [normQuery(s.name)];
+      if (s.name.indexOf("ISS") >= 0) keys.push("iss", "こくさいうちゅうすてーしょん");
+      if (s.name.indexOf("CSS") >= 0) keys.push("css", "てんわ", "ちゅうごく");
+      if (s.name.indexOf("ハッブル") >= 0) keys.push("hst", "はっぶる");
+      catalog.push({ type: "sat", i: i, disp: s.name, keys: keys, pri: 1 });
+    });
+    PLANET_DATA.starNames.forEach(function (e) {
+      var proper = e[1];
+      var ja = properToJa[proper];
+      var keys = [normQuery(proper)];
+      if (ja) keys.push(normQuery(ja), ja);
+      catalog.push({
+        type: "star", i: e[0], disp: ja ? ja + " (" + proper + ")" : proper,
+        keys: keys, mag: starMag[e[0]], pri: 2
+      });
+    });
+    PLANET_DATA.constNames.forEach(function (cn) {
+      catalog.push({
+        type: "const", ra: cn[2] / 100, dec: cn[3] / 100, disp: cn[0],
+        keys: [normQuery(cn[0]), normQuery(cn[1]), cn[0]], pri: 1
+      });
+    });
+  }
+
+  var TYPE_LABEL = { sun: "太陽", moon: "月", planet: "惑星", star: "恒星", const: "星座", sat: "衛星" };
+  function searchEntries(q) {
+    var nq = normQuery(q);
+    if (!nq) return [];
+    var hits = [];
+    for (var i = 0; i < catalog.length; i++) {
+      var e = catalog[i], best = -1;
+      for (var k = 0; k < e.keys.length; k++) {
+        var key = e.keys[k];
+        if (!key) continue;
+        var idx = key.indexOf(nq);
+        if (idx === 0) { best = 0; break; }
+        if (idx > 0 && best < 0) best = 1;
+      }
+      if (best >= 0) hits.push({ e: e, rank: best });
+    }
+    hits.sort(function (a, b) {
+      return (a.rank - b.rank) || (a.e.pri - b.e.pri) ||
+        ((a.e.mag || 99) - (b.e.mag || 99));
+    });
+    return hits.slice(0, 14).map(function (h) { return h.e; });
+  }
+
+  function entryHoriz(e) {
+    switch (e.type) {
+      case "star": return horizAllSky(starRA[e.i], starDec[e.i]);
+      case "const": return horizAllSky(e.ra, e.dec);
+      case "planet":
+        for (var i = 0; i < A.planets.length; i++) {
+          if (A.planets[i].name === e.key) return A.planets[i].h;
+        }
+        return null;
+      case "sun": return A.sunH;
+      case "moon": return A.moonH;
+      case "sat": return satLookAngles(sats[e.i].rec, new Date(simTime()));
+    }
+    return null;
+  }
+
+  function renderResults(list) {
+    var box = document.getElementById("searchresults");
+    box.innerHTML = "";
+    if (!list.length) {
+      var q = document.getElementById("searchinput").value;
+      if (q.trim()) {
+        var d = document.createElement("div");
+        d.className = "sr-empty";
+        d.textContent = "該当なし";
+        box.appendChild(d);
+      }
+      return;
+    }
+    list.forEach(function (e) {
+      var h = entryHoriz(e);
+      var row = document.createElement("div");
+      row.className = "sr-row" + (h && h.alt < 0 ? " below" : "");
+      var t = document.createElement("span");
+      t.className = "sr-type"; t.textContent = TYPE_LABEL[e.type];
+      var n = document.createElement("span");
+      n.textContent = e.disp;
+      var sub = document.createElement("span");
+      sub.className = "sr-sub";
+      sub.textContent = h ? (h.alt >= 0 ? "高度 " + h.alt.toFixed(0) + "°" : "地平線下") : "";
+      row.appendChild(t); row.appendChild(n); row.appendChild(sub);
+      row.addEventListener("click", function () { selectEntry(e); });
+      box.appendChild(row);
+    });
+  }
+
+  function selectEntry(e) {
+    target = { type: e.type, key: e.key, i: e.i, ra: e.ra, dec: e.dec, name: e.disp };
+    document.getElementById("searchbox").classList.add("hidden");
+    var ti = targetInfo();
+    if (ti && state.view === "3d") startGoTo(ti);
+    dirty = true;
+  }
+
+  function toggleSearch() {
+    var box = document.getElementById("searchbox");
+    if (box.classList.contains("hidden")) {
+      buildCatalog();
+      box.classList.remove("hidden");
+      var inp = document.getElementById("searchinput");
+      renderResults(searchEntries(inp.value));
+      inp.focus();
+    } else {
+      box.classList.add("hidden");
+    }
+  }
+
+  // ================= 方位センサー =================
+  function onDevOrient(e) {
+    if (e.alpha === null || e.alpha === undefined) return;
+    var alpha = e.alpha;
+    if (typeof e.webkitCompassHeading === "number" && !gyro.gotAbs) {
+      alpha = 360 - e.webkitCompassHeading;  // iOS: コンパス絶対方位
+    }
+    gyro.a = alpha * D2R;
+    gyro.b = (e.beta || 0) * D2R;
+    gyro.g = (e.gamma || 0) * D2R;
+    gyro.hasData = true;
+    if (gyro.active) dirty = true;
+  }
+  function startGyroListen() {
+    if (gyro.listening) return;
+    gyro.listening = true;
+    if ("ondeviceorientationabsolute" in window) {
+      window.addEventListener("deviceorientationabsolute", function (e) {
+        // データ無しの初回イベント (alpha=null) で絶対方位モードに固定しない
+        if (e.absolute && e.alpha !== null && e.alpha !== undefined) {
+          gyro.gotAbs = true;
+          onDevOrient(e);
+        }
+      });
+    }
+    window.addEventListener("deviceorientation", function (e) {
+      if (gyro.gotAbs) return;
+      onDevOrient(e);
+    });
+  }
+  function setGyro(on) {
+    if (on) {
+      if (!window.DeviceOrientationEvent) {
+        alert("この端末・ブラウザは姿勢センサー API に対応していません");
+        return;
+      }
+      setView("3d");
+      var req = DeviceOrientationEvent.requestPermission;
+      var proceed = function () {
+        startGyroListen();
+        gyro.active = true;
+        gyro.offset = 0;
+        document.getElementById("btn-gyro").classList.add("active");
+        dirty = true;
+        setTimeout(function () {
+          if (gyro.active && !gyro.hasData) {
+            setGyro(false);
+            alert("姿勢センサーのデータを取得できません。センサー非対応の端末か、許可がない可能性があります。");
+          }
+        }, 4000);
+      };
+      if (typeof req === "function") {
+        req.call(DeviceOrientationEvent).then(function (r) {
+          if (r === "granted") proceed();
+          else alert("センサー利用が許可されませんでした");
+        }).catch(function () {
+          alert("センサー許可を要求できません。https 経由で開くと利用できる場合があります。");
+        });
+      } else {
+        proceed();
+      }
+    } else {
+      // 現在の視線を yaw/pitch に引き継ぐ
+      if (gyro.active && gyro.hasData && three.ready) {
+        var d = new THREE.Vector3(0, 0, -1).applyQuaternion(three.camera.quaternion);
+        three.yaw = Math.atan2(d.x, -d.z) * R2D;
+        three.pitch = Math.asin(Math.max(-1, Math.min(1, d.y))) * R2D;
+        three.pitch = Math.max(-30, Math.min(89.5, three.pitch));
+      }
+      gyro.active = false;
+      document.getElementById("btn-gyro").classList.remove("active");
+      dirty = true;
+    }
+  }
+
   // ================= 2D 入力 =================
   (function () {
     var pointers = {}, lastDist = 0, panStart = null;
@@ -1047,6 +1431,20 @@
   $("btn-settings").addEventListener("click", function () { $("panel").classList.add("open"); });
   $("panel-close").addEventListener("click", function () { $("panel").classList.remove("open"); });
 
+  // 検索・方位センサー
+  $("btn-search").addEventListener("click", toggleSearch);
+  $("searchinput").addEventListener("input", function () {
+    renderResults(searchEntries(this.value));
+  });
+  $("search-clear").addEventListener("click", function () {
+    target = null;
+    $("searchinput").value = "";
+    renderResults([]);
+    $("searchbox").classList.add("hidden");
+    dirty = true;
+  });
+  $("btn-gyro").addEventListener("click", function () { setGyro(!gyro.active); });
+
   // 日時
   $("dtinput").value = fmtForInput(state.baseTime);
   $("dtinput").addEventListener("change", function () {
@@ -1136,11 +1534,28 @@
   });
 
   // ================= メインループ =================
-  var lastFrame = performance.now(), lastInputSync = 0;
+  var lastFrame = performance.now(), lastInputSync = 0, lastPulse = 0;
   function loop(now) {
     requestAnimationFrame(loop);
     var dt = (now - lastFrame) / 1000;
     lastFrame = now;
+    // 視線移動アニメーション
+    if (anim && state.view === "3d" && !gyro.active) {
+      var at = (now - anim.t0) / anim.dur;
+      if (at >= 1) {
+        three.yaw = anim.ty; three.pitch = anim.tp; anim = null;
+      } else {
+        var s = at < 0.5 ? 2 * at * at : 1 - Math.pow(-2 * at + 2, 2) / 2;
+        three.yaw = anim.fy + (anim.ty - anim.fy) * s;
+        three.pitch = anim.fp + (anim.tp - anim.fp) * s;
+      }
+      dirty = true;
+    }
+    // 2D ターゲットマーカーの点滅再描画
+    if (target && state.view === "2d" && now - lastPulse > 66) {
+      lastPulse = now;
+      dirty = true;
+    }
     if (state.playing) {
       state.baseTime += dt * 1000 * state.speed;
       if (now - lastInputSync > 500) {
@@ -1159,6 +1574,9 @@
   }
 
   window.addEventListener("resize", function () { resize2d(); resize3d(); dirty = true; });
+
+  // デバッグ用フック (開発・検証時のみ使用)
+  window.__dbg = { three: three, gyro: gyro, state: state, astro: A };
 
   // 初期化
   computeAstro();

@@ -17,6 +17,12 @@
   方位グリッド・地面・大気 (昼夜による空の色と星の減光)
 - 天体タップで名称・等級・高度方位を表示
 - 人工衛星: ISS / CSS / HST (内蔵 TLE スナップショットを SGP4 で伝播)
+- 天体検索: 恒星 (和名エイリアス対応)・星座 (和名/略符)・惑星・太陽・月・衛星。
+  かな正規化つき部分一致。選択すると 2D はマーカー表示、3D は視線移動アニメーション、
+  画面外の場合は方向ガイド矢印を表示
+- 方位センサー連携 (3D): DeviceOrientation API で端末の向きに視線が追従。
+  iOS は requestPermission、Android は deviceorientationabsolute を使用。
+  センサー動作中の左右ドラッグで方位オフセット補正
 
 航空機の表示はリアルタイム ADS-B データが必要なため対象外とした。
 
@@ -32,6 +38,7 @@ tools/          ビルド・検証スクリプト
   build_data.py       data/ から埋め込みデータ (build/embedded_data.js) を生成
   build_html.py       単一 HTML (dist/hoshizora.html) を組み立て
   screenshot_test.js  Playwright による表示確認
+  feature_test.js     検索・方位センサーの動作確認 (合成 DeviceOrientationEvent)
 data/           取得した元データ (git 管理外の大容量含む)
 vendor/         three.min.js r147, satellite.iife.js (v4.1.4 を bun でバンドル)
 build/, dist/   生成物

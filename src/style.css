@@ -39,6 +39,57 @@ body {
   border: 1px solid var(--panel-border); border-radius: 8px; padding: 6px 12px;
   font-size: 13px; cursor: pointer;
 }
+.iconbtn {
+  background: rgba(20,26,40,0.8); color: var(--text);
+  border: 1px solid var(--panel-border); border-radius: 8px;
+  padding: 6px 10px; font-size: 14px; cursor: pointer;
+}
+.iconbtn.active { background: var(--accent); border-color: var(--accent); }
+@media (max-width: 460px) {
+  #title small { display: none; }
+  #btn-settings { padding: 6px 8px; }
+}
+
+/* ---- 検索 ---- */
+#searchbox {
+  position: absolute; top: 46px; left: 8px; right: 8px; z-index: 40;
+  max-width: 420px; margin: 0 auto;
+  background: var(--panel); border: 1px solid var(--panel-border); border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.55); overflow: hidden;
+}
+#searchhead { display: flex; gap: 6px; padding: 8px; }
+#searchinput {
+  flex: 1; min-width: 0; background: #131826; color: var(--text);
+  border: 1px solid var(--panel-border); border-radius: 6px;
+  padding: 8px 10px; font-size: 14px;
+}
+#search-clear {
+  background: #1b2334; color: var(--text-dim); border: 1px solid var(--panel-border);
+  border-radius: 6px; padding: 0 12px; font-size: 12px; cursor: pointer; white-space: nowrap;
+}
+#searchresults { max-height: 46vh; overflow-y: auto; }
+.sr-row {
+  display: flex; align-items: baseline; gap: 8px; padding: 9px 12px;
+  border-top: 1px solid rgba(42,51,72,0.5); cursor: pointer; font-size: 14px;
+}
+.sr-row:active { background: #22304a; }
+.sr-row .sr-type {
+  flex: 0 0 auto; font-size: 10px; color: var(--accent);
+  border: 1px solid var(--panel-border); border-radius: 4px; padding: 1px 5px;
+}
+.sr-row .sr-sub { margin-left: auto; font-size: 11px; color: var(--text-dim); white-space: nowrap; }
+.sr-row.below .sr-sub { color: #7a6a50; }
+.sr-empty { padding: 12px; font-size: 12px; color: var(--text-dim); }
+
+/* ---- 3D 画面外ターゲット矢印 ---- */
+#dirarrow {
+  position: absolute; left: 50%; top: 50%; z-index: 18;
+  width: 0; height: 0; pointer-events: none; display: none;
+}
+#dirarrow span {
+  position: absolute; left: 0; top: 0;
+  color: var(--accent2); font-size: 26px; text-shadow: 0 0 6px #000;
+}
 
 /* ---- 情報表示 ---- */
 #infoline {

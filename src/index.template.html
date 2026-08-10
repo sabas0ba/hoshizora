@@ -31,11 +31,23 @@
     <button id="btn-2d" class="active">2D</button>
     <button id="btn-3d">3D</button>
   </div>
+  <button class="iconbtn" id="btn-search" title="検索">🔍</button>
+  <button class="iconbtn" id="btn-gyro" title="方位センサー (3D)">🧭</button>
   <button id="btn-settings">⚙ 設定</button>
+</div>
+
+<div id="searchbox" class="hidden">
+  <div id="searchhead">
+    <input id="searchinput" type="search" autocomplete="off"
+           placeholder="恒星・星座・惑星・衛星を検索 (例: ベガ, いて座, 土星)">
+    <button id="search-clear">解除</button>
+  </div>
+  <div id="searchresults"></div>
 </div>
 
 <div id="infoline"></div>
 <div id="objinfo"></div>
+<div id="dirarrow"><span>➤</span></div>
 
 <div id="panel">
   <button id="panel-close">✕</button>
@@ -70,6 +82,11 @@
   <p class="note">
     2D: ピンチ/ホイールで拡大、拡大中はドラッグで移動。3D: ドラッグで視線移動、ピンチ/ホイールで画角。
     天体をタップすると情報を表示します。
+  </p>
+  <p class="note">
+    🧭 は 3D ビューで端末の向きに視線を追従させます (要ジャイロ/コンパス。iOS は初回にセンサー許可が必要)。
+    方位がずれる場合はセンサー動作中に左右ドラッグで補正できます。
+    file:// で開くとセンサー許可が得られない端末では、Web サーバ経由 (https) で開いてください。
   </p>
   <p class="note">
     データ出典: HYG v4.1 (CC BY-SA 4.0) / d3-celestial (BSD-3) / CelesTrak TLE。
