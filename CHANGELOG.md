@@ -22,6 +22,9 @@
   観測地が都市プリセットのときだけ、座標ではなく名前 (`city=tokyo`) で反映します。
   URL パラメータで座標を渡して開いた場合も、観測地には反映しますがアドレスバーには
   残しません
+- README に 2D 星座早見から 3D プラネタリウムへ切り替える操作のプレビュー GIF
+  (`docs/preview.gif`) を追加しました。生成には `tools/make_preview_gif.js`
+  (フレーム撮影) と `tools/frames_to_gif.py` (GIF 合成) を使います
 
 ### 変更
 
