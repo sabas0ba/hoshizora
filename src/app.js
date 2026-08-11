@@ -21,9 +21,33 @@
   };
   function simTime() { return state.baseTime + state.offsetMin * 60000; }
 
+  // ================= 観測地プリセット =================
+  // [表示名, 緯度, 経度, URL 用のキー]
+  var PRESETS = [
+    ["東京", 35.6895, 139.6917, "tokyo"], ["大阪", 34.6937, 135.5023, "osaka"],
+    ["札幌", 43.0618, 141.3545, "sapporo"], ["名古屋", 35.1815, 136.9066, "nagoya"],
+    ["福岡", 33.5902, 130.4017, "fukuoka"], ["那覇", 26.2124, 127.6809, "naha"],
+    ["ロンドン", 51.5074, -0.1278, "london"], ["ニューヨーク", 40.7128, -74.0060, "newyork"],
+    ["シドニー", -33.8688, 151.2093, "sydney"], ["ホノルル", 21.3069, -157.8583, "honolulu"]
+  ];
+  // 現在の観測地がプリセット都市と一致すればその添字、しなければ -1
+  function presetIndex() {
+    for (var i = 0; i < PRESETS.length; i++) {
+      if (Math.abs(PRESETS[i][1] - state.lat) < 1e-4 &&
+          Math.abs(PRESETS[i][2] - state.lon) < 1e-4) return i;
+    }
+    return -1;
+  }
+  function presetKey() {
+    var i = presetIndex();
+    return i >= 0 ? PRESETS[i][3] : null;
+  }
+
   // ================= URL パラメータ =================
-  // ?t=2026-08-11T20:00%2B09:00&lat=35.690&lon=139.692&view=2d
+  // ?t=2026-08-11T20:00%2B09:00&city=tokyo&view=2d
+  // ?t=2026-08-11T20:00%2B09:00&lat=35.690&lon=139.692
   // いずれも省略可。不正な値は無視して既定の挙動へフォールバックする。
+  // lat/lon と city が両方あるときは lat/lon を優先する。
   var PARAM_TIME_MIN = Date.UTC(1900, 0, 1), PARAM_TIME_MAX = Date.UTC(2200, 0, 1);
 
   // ISO 8601 の日時。オフセット付き ("...T20:00+09:00") を推奨。
@@ -44,8 +68,16 @@
     return n;
   }
 
+  function findPreset(key) {
+    var k = String(key || "").toLowerCase();
+    for (var i = 0; i < PRESETS.length; i++) {
+      if (PRESETS[i][3] === k) return PRESETS[i];
+    }
+    return null;
+  }
+
   var urlInit = (function () {
-    var empty = { time: null, lat: null, lon: null, view: null };
+    var empty = { time: null, lat: null, lon: null, city: null, view: null };
     if (typeof URLSearchParams !== "function") return empty;
     var q;
     try { q = new URLSearchParams(location.search); } catch (e) { return empty; }
@@ -54,21 +86,16 @@
       time: parseTimeParam(q.get("t")),
       lat: parseAngleParam(q.get("lat"), 90),
       lon: parseAngleParam(q.get("lon"), 180),
+      city: findPreset(q.get("city")),
       view: (v === "2d" || v === "3d") ? v : null
     };
   })();
+  if (urlInit.lat === null && urlInit.lon === null && urlInit.city) {
+    state.lat = urlInit.city[1]; state.lon = urlInit.city[2];
+  }
   if (urlInit.lat !== null) state.lat = urlInit.lat;
   if (urlInit.lon !== null) state.lon = urlInit.lon;
-  if (urlInit.lat !== null || urlInit.lon !== null) state.locSource = "url";
   if (urlInit.view) state.view = urlInit.view;
-
-  // 観測地を URL に載せてよいか。プリセット都市と、URL で渡された座標
-  // (すでにその URL に書かれている = 公開されている) は載せてよい。
-  // 現在地の取得と手入力の座標は、利用者自身の居場所である可能性があるため
-  // 自動では載せず、共有ダイアログで明示的に選ばせる。
-  function locIsPrivate() {
-    return state.locSource === "geo" || state.locSource === "manual";
-  }
 
   // 起動時の基準日時。昼間 (太陽高度が市民薄明より上) に開いた場合は星が
   // ほとんど見えないため、その日の 20:00 の空を初期表示にする。
@@ -1474,8 +1501,13 @@
 
   // ================= URL への状態反映 =================
   // 表示中の日時・観測地・ビューを URL に書き戻し、そのままコピーして
-  // 共有できるようにする。ただし GPS で取得した観測地は利用者の居場所
-  // そのものなので URL には載せない (共有ダイアログで明示的に選べる)。
+  // 共有できるようにする。
+  //
+  // ただし緯度経度はアドレスバーには一切出さない。出してしまうと、共有
+  // ダイアログ (注意書きと同意) を通らずにアドレスバーをコピーするだけで
+  // 座標が渡ってしまうため。プリセット都市は座標ではなく名前 (city=tokyo)
+  // で表し、それ以外の観測地は URL に載せない。緯度経度が入った URL は
+  // 共有ダイアログで明示的に選んだときだけ生成する。
   function fmtTzOffset(ms) {
     var off = -new Date(ms).getTimezoneOffset();   // 分。東側が正
     var a = Math.abs(off);
@@ -1489,7 +1521,11 @@
 
   function stateQuery(includeLoc) {
     var q = ["t=" + encParam(fmtForInput(simTime()) + fmtTzOffset(simTime()))];
-    if (includeLoc) q.push("lat=" + round4(state.lat), "lon=" + round4(state.lon));
+    if (includeLoc) {
+      var key = presetKey();
+      if (key) q.push("city=" + key);
+      else q.push("lat=" + round4(state.lat), "lon=" + round4(state.lon));
+    }
     q.push("view=" + state.view);
     return "?" + q.join("&");
   }
@@ -1511,7 +1547,8 @@
       }
       return;
     }
-    var q = stateQuery(!locIsPrivate());
+    // アドレスバーに載せるのはプリセット都市 (名前) のときだけ
+    var q = stateQuery(presetKey() !== null);
     urlSyncAt = performance.now();
     if (q === urlSyncQuery) return;
     urlSyncQuery = q;
@@ -1600,41 +1637,27 @@
     var la = parseFloat($("latinput").value), lo = parseFloat($("loninput").value);
     if (isFinite(la) && Math.abs(la) <= 90) state.lat = la;
     if (isFinite(lo) && Math.abs(lo) <= 180) state.lon = lo;
-    // 手入力の座標は自宅などの可能性がある。都市の座標そのものを打ち込んだ
-    // 場合に限り、プリセットを選んだのと同じ扱いにする。
-    state.locSource = syncCitySel() ? "preset" : "manual";
+    syncCitySel();
     refresh();
   }
   $("latinput").addEventListener("change", onLoc);
   $("loninput").addEventListener("change", onLoc);
-  var PRESETS = [
-    ["東京", 35.6895, 139.6917], ["大阪", 34.6937, 135.5023], ["札幌", 43.0618, 141.3545],
-    ["名古屋", 35.1815, 136.9066], ["福岡", 33.5902, 130.4017], ["那覇", 26.2124, 127.6809],
-    ["ロンドン", 51.5074, -0.1278], ["ニューヨーク", 40.7128, -74.0060],
-    ["シドニー", -33.8688, 151.2093], ["ホノルル", 21.3069, -157.8583]
-  ];
   var sel = $("citysel");
   PRESETS.forEach(function (p, i) {
     var o = document.createElement("option");
     o.value = i; o.textContent = p[0];
     sel.appendChild(o);
   });
-  // 現在の緯度経度に一致するプリセットがあれば都市欄に反映する (一致有無を返す)
+  // 現在の緯度経度に一致するプリセットがあれば都市欄に反映する
   function syncCitySel() {
-    var v = "";
-    for (var i = 0; i < PRESETS.length; i++) {
-      if (Math.abs(PRESETS[i][1] - state.lat) < 1e-4 &&
-          Math.abs(PRESETS[i][2] - state.lon) < 1e-4) { v = String(i); break; }
-    }
-    sel.value = v;
-    return v !== "";
+    var i = presetIndex();
+    sel.value = i >= 0 ? String(i) : "";
   }
   syncCitySel();
   sel.addEventListener("change", function () {
     var p = PRESETS[this.value];
     if (!p) return;
     state.lat = p[1]; state.lon = p[2];
-    state.locSource = "preset";   // 公開されている都市の座標なので共有してよい
     $("latinput").value = p[1]; $("loninput").value = p[2];
     refresh();
   });
@@ -1643,9 +1666,6 @@
     navigator.geolocation.getCurrentPosition(function (pos) {
       state.lat = Math.round(pos.coords.latitude * 10000) / 10000;
       state.lon = Math.round(pos.coords.longitude * 10000) / 10000;
-      // 以降この座標は「利用者の居場所」として扱う。手入力で微修正されても
-      // 元が現在地であることに変わりはないため、都市を選び直すまで解除しない。
-      state.locSource = "geo";
       $("latinput").value = state.lat; $("loninput").value = state.lon;
       syncCitySel();
       refresh();
@@ -1657,9 +1677,10 @@
     $("shareurl").value = stateUrl($("share-loc").checked);
   }
   $("btn-share").addEventListener("click", function () {
-    var priv = locIsPrivate();
-    $("share-warn").classList.toggle("hidden", !priv);
-    $("share-loc").checked = !priv;   // 現在地・手入力のときは既定で含めない
+    // プリセット都市以外は URL に緯度経度が入るため、注意書きを出して既定で外す
+    var coords = presetKey() === null;
+    $("share-warn").classList.toggle("hidden", !coords);
+    $("share-loc").checked = !coords;
     $("share-msg").textContent = "";
     updateShareUrl();
     $("sharedlg").classList.remove("hidden");
