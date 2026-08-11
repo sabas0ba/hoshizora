@@ -8,7 +8,7 @@
   // ================= 状態 =================
   var state = {
     lat: 35.6895, lon: 139.6917,          // 東京
-    baseTime: Date.now(),                  // 基準日時 [ms]
+    baseTime: Date.now(),                  // 基準日時 [ms] (下の initialBaseTime で確定)
     offsetMin: 0,                          // スライダーオフセット [min]
     view: "2d",
     playing: false, speed: 60,
@@ -19,6 +19,22 @@
     }
   };
   function simTime() { return state.baseTime + state.offsetMin * 60000; }
+
+  // 起動時の基準日時。昼間 (太陽高度が市民薄明より上) に開いた場合は星が
+  // ほとんど見えないため、その日の 20:00 (現地時刻) の空を初期表示にする。
+  // 夜間に開いた場合は現在時刻をそのまま使う。
+  var INITIAL_NIGHT_HOUR = 20;
+  function initialBaseTime() {
+    var now = Date.now();
+    var jd = Astro.julianDate(now);
+    var sun = Astro.sunPosition(jd);
+    var h = Astro.eqToHorizontal(sun.ra, sun.dec, Astro.lst(jd, state.lon), state.lat);
+    if (h.alt <= -6) return now;   // すでに夜
+    var d = new Date(now);
+    d.setHours(INITIAL_NIGHT_HOUR, 0, 0, 0);
+    return d.getTime();
+  }
+  state.baseTime = initialBaseTime();
 
   var target = null;   // 検索で選択中の天体 {type, ...}
   var anim = null;     // 3D 視線移動アニメーション
@@ -127,9 +143,13 @@
   var view2 = { zoom: 1, panX: 0, panY: 0, W: 0, H: 0, R: 0, cx: 0, cy: 0 };
 
   function resize2d() {
+    // 非表示中 (3D 表示中) はサイズが 0 になる。そのまま反映するとキャンバスが
+    // 0×0 になり 2D に戻したときに何も描けなくなるため、無視して切替時に測り直す。
+    var w = cv2.clientWidth, h = cv2.clientHeight;
+    if (w <= 0 || h <= 0) return;
     var dpr = Math.min(2, window.devicePixelRatio || 1);
-    view2.W = cv2.clientWidth; view2.H = cv2.clientHeight;
-    cv2.width = view2.W * dpr; cv2.height = view2.H * dpr;
+    view2.W = w; view2.H = h;
+    cv2.width = w * dpr; cv2.height = h * dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     dirty = true;
   }
@@ -821,6 +841,8 @@
     if (!three.ready) return;
     var cv3 = document.getElementById("canvas3d");
     var w = cv3.clientWidth, h = cv3.clientHeight;
+    // 非表示中は 0 になる。aspect が NaN になって描画が壊れるので無視する。
+    if (w <= 0 || h <= 0) return;
     three.renderer.setSize(w, h, false);
     three.camera.aspect = w / h;
     three.camera.updateProjectionMatrix();
@@ -1421,7 +1443,10 @@
     $("btn-3d").classList.toggle("active", v === "3d");
     $("canvas2d").classList.toggle("hidden", v !== "2d");
     $("canvas3d").classList.toggle("hidden", v !== "3d");
+    // 非表示中のリサイズ (端末回転・URL バーの開閉など) は反映できないため、
+    // 表示に戻したこの時点でキャンバスのサイズを測り直す。
     if (v === "3d") { init3d(); resize3d(); }
+    else resize2d();
     dirty = true;
   }
   $("btn-2d").addEventListener("click", function () { setView("2d"); });
