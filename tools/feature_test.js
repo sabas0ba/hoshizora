@@ -80,6 +80,41 @@ const path = require("path");
   await page.click("#btn-gyro");
   await page.waitForTimeout(300);
 
+  // --- ビュー切替: 非表示中のリサイズを挟んでもキャンバスが潰れないこと ---
+  await page.click("#btn-2d");
+  await page.waitForTimeout(300);
+  await page.click("#btn-3d");
+  await page.waitForTimeout(400);
+  await page.setViewportSize({ width: 480, height: 820 }); // 3D 表示中にリサイズ
+  await page.waitForTimeout(300);
+  await page.click("#btn-2d");
+  await page.waitForTimeout(400);
+  const sizes = await page.evaluate(() => {
+    const c2 = document.getElementById("canvas2d");
+    return { w: c2.width, h: c2.height, aspect: window.__dbg.three.camera.aspect };
+  });
+  console.log("2D canvas after 3D+resize:", JSON.stringify(sizes));
+  if (sizes.w === 0 || sizes.h === 0) errors.push("2D キャンバスが 0×0 になった");
+  if (!isFinite(sizes.aspect)) errors.push("3D カメラの aspect が NaN になった");
+  await page.screenshot({ path: "/tmp/ft_view_switch.png" });
+
+  // --- 起動時の基準日時: 昼間に開いたらその日の 20:00 になること ---
+  for (const [now, expect] of [
+    ["2026-08-11T13:00:00+09:00", "2026-08-11T20:00"],  // 昼 → 20:00 へ
+    ["2026-08-11T21:30:00+09:00", "2026-08-11T21:30"],  // 夜 → 現在時刻のまま
+  ]) {
+    const c = await browser.newContext({ viewport: { width: 480, height: 900 }, timezoneId: "Asia/Tokyo" });
+    const p = await c.newPage();
+    p.on("pageerror", (e) => errors.push(String(e)));
+    await p.clock.setFixedTime(new Date(now));
+    await p.goto("file://" + path.resolve(__dirname, "../dist/hoshizora.html"));
+    await p.waitForTimeout(700);
+    const got = await p.inputValue("#dtinput");
+    console.log("起動時刻", now, "-> 基準日時", got);
+    if (got !== expect) errors.push(`起動時の基準日時が ${expect} ではなく ${got}`);
+    await c.close();
+  }
+
   console.log("console errors:", errors.length ? errors : "(none)");
   await browser.close();
   process.exit(errors.length ? 1 : 0);
