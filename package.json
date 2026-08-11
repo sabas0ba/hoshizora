@@ -1,0 +1,20 @@
+{
+  "name": "hoshizora",
+  "version": "1.0.0",
+  "description": "日時と緯度経度から星空を 2D/3D 表示する単一ファイルの天体シミュレータ",
+  "license": "Apache-2.0",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sabas0ba/hoshizora.git"
+  },
+  "scripts": {
+    "build": "python3 tools/build_data.py && python3 tools/build_html.py",
+    "check": "python3 tools/check_dist.py",
+    "test": "node tools/screenshot_test.js && node tools/feature_test.js",
+    "verify-sources": "tools/fetch_sources.sh --verify"
+  },
+  "devDependencies": {
+    "playwright": "1.56.0"
+  }
+}

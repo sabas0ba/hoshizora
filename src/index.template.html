@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>星空シミュレータ</title>
+<!--
+  hoshizora - 星空シミュレータ (単一ファイル / オフライン動作)
+  https://github.com/sabas0ba/hoshizora
+
+  Copyright 2026 sabas0ba
+  自作コードは Apache License 2.0。ただし本ファイルには CC BY-SA 4.0 の
+  恒星カタログ (HYG Database) が埋め込まれており、再配布時は同ライセンスの
+  帰属表示と継承が必要です。詳細は上記リポジトリの THIRD-PARTY-NOTICES.md を参照。
+
+  データ出典:
+    - 恒星: HYG Database v4.1 (astronexus/HYG-Database, CC BY-SA 4.0)
+    - 星座線・星座名・天の川輪郭: d3-celestial (ofrohn/d3-celestial, BSD-3-Clause)
+    - 衛星軌道: CelesTrak TLE (取得時点のスナップショット)
+  ライブラリ:
+    - three.js r147 (MIT)
+    - satellite.js 4.1.4 (MIT)
+  計算: Meeus "Astronomical Algorithms" に基づく略算 (表示用途向け精度)
+-->
+<style>
+{{STYLE}}
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="canvas2d"></canvas>
+  <canvas id="canvas3d" class="hidden"></canvas>
+</div>
+
+<div id="topbar">
+  <span id="title">星空シミュレータ<small>ほしぞら早見</small></span>
+  <div class="seg">
+    <button id="btn-2d" class="active">2D</button>
+    <button id="btn-3d">3D</button>
+  </div>
+  <button class="iconbtn" id="btn-search" title="検索">🔍</button>
+  <button class="iconbtn" id="btn-gyro" title="方位センサー (3D)">🧭</button>
+  <button id="btn-settings">⚙ 設定</button>
+</div>
+
+<div id="searchbox" class="hidden">
+  <div id="searchhead">
+    <input id="searchinput" type="search" autocomplete="off"
+           placeholder="恒星・星座・惑星・衛星を検索 (例: ベガ, いて座, 土星)">
+    <button id="search-clear">解除</button>
+  </div>
+  <div id="searchresults"></div>
+</div>
+
+<div id="infoline"></div>
+<div id="objinfo"></div>
+<div id="dirarrow"><span>➤</span></div>
+
+<div id="panel">
+  <button id="panel-close">✕</button>
+  <h3>日時</h3>
+  <div class="row"><label>基準日時</label><input type="datetime-local" id="dtinput"></div>
+  <div class="btnrow"><button id="btn-now">現在時刻に戻す</button></div>
+
+  <h3>観測地</h3>
+  <div class="row"><label>都市</label><select id="citysel"><option value="">選択…</option></select></div>
+  <div class="row"><label>緯度</label><input type="number" id="latinput" step="0.0001" min="-90" max="90"></div>
+  <div class="row"><label>経度</label><input type="number" id="loninput" step="0.0001" min="-180" max="180"></div>
+  <div class="btnrow"><button id="btn-geo">現在地を取得</button></div>
+
+  <h3>表示</h3>
+  <div class="toggles">
+    <label class="tg"><input type="checkbox" id="tg-constlines">星座線</label>
+    <label class="tg"><input type="checkbox" id="tg-constnames">星座名</label>
+    <label class="tg"><input type="checkbox" id="tg-starnames">恒星名</label>
+    <label class="tg"><input type="checkbox" id="tg-planets">惑星</label>
+    <label class="tg"><input type="checkbox" id="tg-sunmoon">太陽・月</label>
+    <label class="tg"><input type="checkbox" id="tg-milkyway">天の川</label>
+    <label class="tg"><input type="checkbox" id="tg-sats">人工衛星</label>
+    <label class="tg"><input type="checkbox" id="tg-grid">方位グリッド</label>
+    <label class="tg"><input type="checkbox" id="tg-ground">地面 (3D)</label>
+    <label class="tg"><input type="checkbox" id="tg-atmo">大気 (昼夜)</label>
+  </div>
+  <p class="note">
+    人工衛星は ISS・CSS・ハッブルの軌道要素 (TLE) を内蔵しています。
+    TLE は取得時点 ({{TLE_DATE}}) のスナップショットのため、基準日時から離れるほど位置誤差が増えます。
+    航空機の表示にはリアルタイム ADS-B データが必要なため、本ツール (オフライン単一ファイル) には含めていません。
+  </p>
+  <p class="note">
+    2D: ピンチ/ホイールで拡大、拡大中はドラッグで移動。3D: ドラッグで視線移動、ピンチ/ホイールで画角。
+    天体をタップすると情報を表示します。
+  </p>
+  <p class="note">
+    🧭 は 3D ビューで端末の向きに視線を追従させます (要ジャイロ/コンパス。iOS は初回にセンサー許可が必要)。
+    方位がずれる場合はセンサー動作中に左右ドラッグで補正できます。
+    file:// で開くとセンサー許可が得られない端末では、Web サーバ経由 (https) で開いてください。
+  </p>
+  <p class="note">
+    データ出典: HYG v4.1 (CC BY-SA 4.0) / d3-celestial (BSD-3) / CelesTrak TLE。
+    ライブラリ: three.js r147, satellite.js 4.1.4 (MIT)。
+    位置計算は Meeus の略算式によります (表示用途向け)。
+  </p>
+  <p class="note">
+    hoshizora &mdash; <a href="https://github.com/sabas0ba/hoshizora"
+    target="_blank" rel="noopener">github.com/sabas0ba/hoshizora</a><br>
+    自作コードは Apache-2.0。本ファイルは CC BY-SA 4.0 の恒星データを含みます。
+  </p>
+</div>
+
+<div id="timebar">
+  <div id="timelabel"></div>
+  <div id="slider-row">
+    <button class="tbtn" id="btn-play">▶</button>
+    <select id="speed">
+      <option value="1">×1</option>
+      <option value="60" selected>×60</option>
+      <option value="600">×600</option>
+      <option value="3600">×1時間/秒</option>
+      <option value="86400">×1日/秒</option>
+    </select>
+    <input type="range" id="timeslider" min="-1440" max="1440" step="1" value="0">
+  </div>
+</div>
+
+<script>
+{{THREE}}
+</script>
+<script>
+{{SATELLITE}}
+</script>
+<script>
+{{DATA}}
+</script>
+<script>
+{{ASTRO}}
+</script>
+<script>
+{{APP}}
+</script>
+</body>
+</html>

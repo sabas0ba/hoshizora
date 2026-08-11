@@ -1,0 +1,16 @@
+# ビルド生成物 (GitHub Actions が生成し Pages へデプロイする)
+/build/
+/dist/
+
+# tools/fetch_sources.sh の作業ディレクトリ
+/.fetch-work/
+
+# 依存
+/node_modules/
+
+# 上流の完全版カタログ (約 34 MB)。抽出版 data/hyg_v41_mag6.csv のみを追跡する。
+/data/hygdata_v41.csv
+
+# OS・エディタ
+.DS_Store
+*.swp
