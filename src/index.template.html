@@ -68,6 +68,14 @@
   <div class="row"><label>経度</label><input type="number" id="loninput" step="0.0001" min="-180" max="180"></div>
   <div class="btnrow"><button id="btn-geo">現在地を取得</button></div>
 
+  <h3>共有</h3>
+  <div class="btnrow"><button id="btn-share">この空の URL を作る</button></div>
+  <p class="note">
+    表示中の日時・観測地・ビューは URL に反映されます
+    (<code>?t=</code> / <code>lat</code> / <code>lon</code> / <code>view</code>)。
+    「現在地を取得」で設定した観測地は、共有時に含めるかどうかを選べます。
+  </p>
+
   <h3>表示</h3>
   <div class="toggles">
     <label class="tg"><input type="checkbox" id="tg-constlines">星座線</label>
@@ -105,6 +113,25 @@
     target="_blank" rel="noopener">github.com/sabas0ba/hoshizora</a><br>
     自作コードは Apache-2.0。本ファイルは CC BY-SA 4.0 の恒星データを含みます。
   </p>
+</div>
+
+<div id="sharedlg" class="hidden">
+  <div class="dlg">
+    <h3>この空を共有</h3>
+    <p class="note">表示中の日時・観測地・ビューを開く URL です。</p>
+    <p class="note warn hidden" id="share-warn">
+      観測地は「現在地を取得」で設定されています。緯度経度を含めた URL は
+      あなたの居場所を渡した相手に伝えることになります。含めない場合、
+      受け取った相手には既定の観測地 (東京) で表示されます。
+    </p>
+    <label class="tg"><input type="checkbox" id="share-loc">観測地の緯度経度を含める</label>
+    <input id="shareurl" type="text" readonly spellcheck="false">
+    <div class="btnrow">
+      <button id="share-copy">URL をコピー</button>
+      <button id="share-close">閉じる</button>
+    </div>
+    <p class="note" id="share-msg"></p>
+  </div>
 </div>
 
 <div id="timebar">

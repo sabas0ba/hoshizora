@@ -8,6 +8,7 @@
   // ================= 状態 =================
   var state = {
     lat: 35.6895, lon: 139.6917,          // 東京
+    locFromGeo: false,                     // 観測地を GPS で取得したか (URL 共有の判断に使う)
     baseTime: Date.now(),                  // 基準日時 [ms] (下の initialBaseTime で確定)
     offsetMin: 0,                          // スライダーオフセット [min]
     view: "2d",
@@ -20,9 +21,53 @@
   };
   function simTime() { return state.baseTime + state.offsetMin * 60000; }
 
+  // ================= URL パラメータ =================
+  // ?t=2026-08-11T20:00%2B09:00&lat=35.690&lon=139.692&view=2d
+  // いずれも省略可。不正な値は無視して既定の挙動へフォールバックする。
+  var PARAM_TIME_MIN = Date.UTC(1900, 0, 1), PARAM_TIME_MAX = Date.UTC(2200, 0, 1);
+
+  // ISO 8601 の日時。オフセット付き ("...T20:00+09:00") を推奨。
+  // オフセット無しはブラウザのローカルタイムゾーンで解釈される。
+  function parseTimeParam(v) {
+    if (!v) return null;
+    var s = String(v).trim();
+    // 生の "+" はクエリ文字列の復号で空白になるため、末尾のオフセットだけ戻す
+    if (/T\d{2}:\d{2}/.test(s)) s = s.replace(/ (\d{2}:?\d{2})$/, "+$1");
+    var ms = Date.parse(s);
+    if (!isFinite(ms) || ms < PARAM_TIME_MIN || ms > PARAM_TIME_MAX) return null;
+    return ms;
+  }
+  function parseAngleParam(v, limit) {
+    if (v === null || v === undefined || v === "") return null;
+    var n = parseFloat(v);
+    if (!isFinite(n) || Math.abs(n) > limit) return null;
+    return n;
+  }
+
+  var urlInit = (function () {
+    var empty = { time: null, lat: null, lon: null, view: null };
+    if (typeof URLSearchParams !== "function") return empty;
+    var q;
+    try { q = new URLSearchParams(location.search); } catch (e) { return empty; }
+    var v = (q.get("view") || "").toLowerCase();
+    return {
+      time: parseTimeParam(q.get("t")),
+      lat: parseAngleParam(q.get("lat"), 90),
+      lon: parseAngleParam(q.get("lon"), 180),
+      view: (v === "2d" || v === "3d") ? v : null
+    };
+  })();
+  if (urlInit.lat !== null) state.lat = urlInit.lat;
+  if (urlInit.lon !== null) state.lon = urlInit.lon;
+  if (urlInit.view) state.view = urlInit.view;
+
   // 起動時の基準日時。昼間 (太陽高度が市民薄明より上) に開いた場合は星が
-  // ほとんど見えないため、その日の 20:00 (現地時刻) の空を初期表示にする。
+  // ほとんど見えないため、その日の 20:00 の空を初期表示にする。
   // 夜間に開いた場合は現在時刻をそのまま使う。
+  //
+  // 20:00 は「観測地の時刻」として解釈する。ブラウザのローカルタイムゾーンで
+  // 解釈すると、実行環境と観測地がずれている場合 (UTC のサーバから東京の空を
+  // 見る等) に昼の空を選んでしまうため、経度から求めたオフセットを使う。
   var INITIAL_NIGHT_HOUR = 20;
   function initialBaseTime() {
     var now = Date.now();
@@ -30,11 +75,12 @@
     var sun = Astro.sunPosition(jd);
     var h = Astro.eqToHorizontal(sun.ra, sun.dec, Astro.lst(jd, state.lon), state.lat);
     if (h.alt <= -6) return now;   // すでに夜
-    var d = new Date(now);
-    d.setHours(INITIAL_NIGHT_HOUR, 0, 0, 0);
-    return d.getTime();
+    // 経度 15° = 1 時間。標準時は 1 時間刻みが大半なので丸めて用いる
+    var offMs = Math.round(state.lon / 15) * 3600000;
+    var midnight = Math.floor((now + offMs) / 86400000) * 86400000;  // 観測地の 0:00
+    return midnight + INITIAL_NIGHT_HOUR * 3600000 - offMs;
   }
-  state.baseTime = initialBaseTime();
+  state.baseTime = urlInit.time !== null ? urlInit.time : initialBaseTime();
 
   var target = null;   // 検索で選択中の天体 {type, ...}
   var anim = null;     // 3D 視線移動アニメーション
@@ -1417,6 +1463,56 @@
       + "T" + pad(d.getHours()) + ":" + pad(d.getMinutes());
   }
 
+  // ================= URL への状態反映 =================
+  // 表示中の日時・観測地・ビューを URL に書き戻し、そのままコピーして
+  // 共有できるようにする。ただし GPS で取得した観測地は利用者の居場所
+  // そのものなので URL には載せない (共有ダイアログで明示的に選べる)。
+  function fmtTzOffset(ms) {
+    var off = -new Date(ms).getTimezoneOffset();   // 分。東側が正
+    var a = Math.abs(off);
+    return (off < 0 ? "-" : "+") + pad(Math.floor(a / 60)) + ":" + pad(a % 60);
+  }
+  function encParam(v) {
+    // ":" はエスケープしなくても曖昧さがないため、読みやすさを優先して戻す
+    return encodeURIComponent(v).replace(/%3A/g, ":");
+  }
+  function round4(v) { return String(Math.round(v * 10000) / 10000); }
+
+  function stateQuery(includeLoc) {
+    var q = ["t=" + encParam(fmtForInput(simTime()) + fmtTzOffset(simTime()))];
+    if (includeLoc) q.push("lat=" + round4(state.lat), "lon=" + round4(state.lon));
+    q.push("view=" + state.view);
+    return "?" + q.join("&");
+  }
+  function stateUrl(includeLoc) {
+    return location.href.split(/[?#]/)[0] + stateQuery(includeLoc);
+  }
+
+  // file:// は origin が null で replaceState が例外になるため同期しない
+  var urlSyncOk = location.protocol !== "file:" &&
+    !!(window.history && typeof history.replaceState === "function");
+  var URL_SYNC_INTERVAL = 1000;   // 再生中に呼ばれ続けるので間引く
+  var urlSyncAt = -1e9, urlSyncQuery = null, urlSyncTimer = null;
+  function syncUrl() {
+    if (!urlSyncOk) return;
+    var wait = URL_SYNC_INTERVAL - (performance.now() - urlSyncAt);
+    if (wait > 0) {
+      if (!urlSyncTimer) {
+        urlSyncTimer = setTimeout(function () { urlSyncTimer = null; syncUrl(); }, wait);
+      }
+      return;
+    }
+    var q = stateQuery(!state.locFromGeo);
+    urlSyncAt = performance.now();
+    if (q === urlSyncQuery) return;
+    urlSyncQuery = q;
+    try {
+      history.replaceState(history.state, "", q + location.hash);
+    } catch (e) {
+      urlSyncOk = false;   // 想定外の環境では以後あきらめる
+    }
+  }
+
   function updateTimeLabel() {
     var t = simTime();
     var off = state.offsetMin;
@@ -1433,6 +1529,7 @@
   function refresh() {
     computeAstro();
     updateTimeLabel();
+    syncUrl();
     dirty = true;
   }
 
@@ -1447,6 +1544,7 @@
     // 表示に戻したこの時点でキャンバスのサイズを測り直す。
     if (v === "3d") { init3d(); resize3d(); }
     else resize2d();
+    syncUrl();
     dirty = true;
   }
   $("btn-2d").addEventListener("click", function () { setView("2d"); });
@@ -1493,6 +1591,8 @@
     var la = parseFloat($("latinput").value), lo = parseFloat($("loninput").value);
     if (isFinite(la) && Math.abs(la) <= 90) state.lat = la;
     if (isFinite(lo) && Math.abs(lo) <= 180) state.lon = lo;
+    // 都市の座標そのものを打ち込んだ場合は、現在地としての扱いを解除してよい
+    if (syncCitySel()) state.locFromGeo = false;
     refresh();
   }
   $("latinput").addEventListener("change", onLoc);
@@ -1509,10 +1609,22 @@
     o.value = i; o.textContent = p[0];
     sel.appendChild(o);
   });
+  // 現在の緯度経度に一致するプリセットがあれば都市欄に反映する (一致有無を返す)
+  function syncCitySel() {
+    var v = "";
+    for (var i = 0; i < PRESETS.length; i++) {
+      if (Math.abs(PRESETS[i][1] - state.lat) < 1e-4 &&
+          Math.abs(PRESETS[i][2] - state.lon) < 1e-4) { v = String(i); break; }
+    }
+    sel.value = v;
+    return v !== "";
+  }
+  syncCitySel();
   sel.addEventListener("change", function () {
     var p = PRESETS[this.value];
     if (!p) return;
     state.lat = p[1]; state.lon = p[2];
+    state.locFromGeo = false;   // 公開されている都市の座標なので共有してよい
     $("latinput").value = p[1]; $("loninput").value = p[2];
     refresh();
   });
@@ -1521,9 +1633,52 @@
     navigator.geolocation.getCurrentPosition(function (pos) {
       state.lat = Math.round(pos.coords.latitude * 10000) / 10000;
       state.lon = Math.round(pos.coords.longitude * 10000) / 10000;
+      // 以降この座標は「利用者の居場所」として扱う。手入力で微修正されても
+      // 元が現在地であることに変わりはないため、都市を選び直すまで解除しない。
+      state.locFromGeo = true;
       $("latinput").value = state.lat; $("loninput").value = state.lon;
+      syncCitySel();
       refresh();
     }, function () { alert("現在地を取得できませんでした"); });
+  });
+
+  // 共有 URL
+  function updateShareUrl() {
+    $("shareurl").value = stateUrl($("share-loc").checked);
+  }
+  $("btn-share").addEventListener("click", function () {
+    var geo = state.locFromGeo;
+    $("share-warn").classList.toggle("hidden", !geo);
+    $("share-loc").checked = !geo;   // 現在地のときは既定で含めない
+    $("share-msg").textContent = "";
+    updateShareUrl();
+    $("sharedlg").classList.remove("hidden");
+    $("shareurl").select();
+  });
+  $("share-loc").addEventListener("change", function () {
+    updateShareUrl();
+    $("share-msg").textContent = "";
+  });
+  $("share-copy").addEventListener("click", function () {
+    var el = $("shareurl");
+    el.select();
+    function done(ok) {
+      $("share-msg").textContent = ok ? "コピーしました" :
+        "コピーできませんでした。URL を選択して手動でコピーしてください。";
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(el.value).then(function () { done(true); },
+        function () { done(false); });
+      return;
+    }
+    var ok = false;
+    try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+    done(ok);
+  });
+  function closeShare() { $("sharedlg").classList.add("hidden"); }
+  $("share-close").addEventListener("click", closeShare);
+  $("sharedlg").addEventListener("click", function (e) {
+    if (e.target === this) closeShare();   // 背景クリックで閉じる
   });
 
   // トグル
@@ -1607,6 +1762,6 @@
   computeAstro();
   resize2d();
   updateTimeLabel();
-  setView("2d");
+  setView(state.view);
   requestAnimationFrame(loop);
 })();

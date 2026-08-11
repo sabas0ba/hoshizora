@@ -1,6 +1,12 @@
-// 検索・方位センサー機能の動作確認 (合成 DeviceOrientationEvent 使用)
+// 検索・方位センサー・URL パラメータの動作確認 (合成 DeviceOrientationEvent 使用)
 const { chromium } = require("playwright");
 const path = require("path");
+const fs = require("fs");
+const http = require("http");
+
+const DIST = path.resolve(__dirname, "../dist/hoshizora.html");
+const FILE_URL = "file://" + DIST;
+const VIEWPORT = { width: 480, height: 900 };
 
 (async () => {
   const browser = await chromium.launch();
@@ -99,21 +105,114 @@ const path = require("path");
   await page.screenshot({ path: "/tmp/ft_view_switch.png" });
 
   // --- 起動時の基準日時: 昼間に開いたらその日の 20:00 になること ---
-  for (const [now, expect] of [
-    ["2026-08-11T13:00:00+09:00", "2026-08-11T20:00"],  // 昼 → 20:00 へ
-    ["2026-08-11T21:30:00+09:00", "2026-08-11T21:30"],  // 夜 → 現在時刻のまま
+  // 20:00 は観測地 (既定は東京 = UTC+9) の時刻。ブラウザのタイムゾーンが
+  // 異なっていても同じ空になる = dtinput の表示はブラウザ時刻に従う。
+  for (const [tz, now, expect] of [
+    ["Asia/Tokyo", "2026-08-11T13:00:00+09:00", "2026-08-11T20:00"],  // 昼 → 20:00 JST へ
+    ["Asia/Tokyo", "2026-08-11T21:30:00+09:00", "2026-08-11T21:30"],  // 夜 → 現在時刻のまま
+    ["UTC", "2026-08-11T04:52:00Z", "2026-08-11T11:00"],  // 昼 → 20:00 JST = 11:00 UTC
+    ["UTC", "2026-08-11T10:09:00Z", "2026-08-11T10:09"],  // 夜 (19:09 JST) → 現在時刻のまま
   ]) {
-    const c = await browser.newContext({ viewport: { width: 480, height: 900 }, timezoneId: "Asia/Tokyo" });
+    const c = await browser.newContext({ viewport: VIEWPORT, timezoneId: tz });
     const p = await c.newPage();
     p.on("pageerror", (e) => errors.push(String(e)));
     await p.clock.setFixedTime(new Date(now));
-    await p.goto("file://" + path.resolve(__dirname, "../dist/hoshizora.html"));
+    await p.goto(FILE_URL);
     await p.waitForTimeout(700);
     const got = await p.inputValue("#dtinput");
-    console.log("起動時刻", now, "-> 基準日時", got);
-    if (got !== expect) errors.push(`起動時の基準日時が ${expect} ではなく ${got}`);
+    console.log("起動 (" + tz + ")", now, "-> 基準日時", got);
+    if (got !== expect) errors.push(`起動時の基準日時 (${tz}, ${now}) が ${expect} ではなく ${got}`);
     await c.close();
   }
+
+  // --- URL パラメータ ---
+  for (const [label, query, expect] of [
+    ["指定あり", "?t=2026-08-11T20:00%2B09:00&lat=-33.8688&lon=151.2093&view=3d",
+      { t: Date.UTC(2026, 7, 11, 11, 0), lat: -33.8688, lon: 151.2093, view: "3d" }],
+    ["+ が空白に化けた場合", "?t=2026-08-11T20:00+09:00",
+      { t: Date.UTC(2026, 7, 11, 11, 0), lat: 35.6895, lon: 139.6917, view: "2d" }],
+    ["不正値は無視して既定へ", "?t=yesterday&lat=999&lon=abc&view=4d",
+      { t: Date.UTC(2026, 7, 11, 11, 0), lat: 35.6895, lon: 139.6917, view: "2d" }],
+  ]) {
+    const c = await browser.newContext({ viewport: VIEWPORT, timezoneId: "UTC" });
+    const p = await c.newPage();
+    p.on("pageerror", (e) => errors.push(String(e)));
+    // 不正値の行は「昼間フォールバックで 20:00 JST になる」ことも同時に確認する
+    await p.clock.setFixedTime(new Date("2026-08-11T04:52:00Z"));
+    await p.goto(FILE_URL + query);
+    await p.waitForTimeout(700);
+    const got = await p.evaluate(() => ({
+      t: window.__dbg.state.baseTime, lat: window.__dbg.state.lat,
+      lon: window.__dbg.state.lon, view: window.__dbg.state.view,
+      hidden3d: document.getElementById("canvas3d").classList.contains("hidden"),
+    }));
+    console.log("URL パラメータ (" + label + "):", JSON.stringify(got));
+    for (const k of ["t", "lat", "lon", "view"]) {
+      if (got[k] !== expect[k]) errors.push(`URL パラメータ ${label}: ${k} が ${expect[k]} ではなく ${got[k]}`);
+    }
+    if (got.view === "3d" && got.hidden3d) errors.push("view=3d でも 3D キャンバスが非表示のまま");
+    await p.screenshot({ path: "/tmp/ft_urlparam_" + (expect.view === "3d" ? "3d" : "2d") + ".png" });
+    await c.close();
+  }
+
+  // --- 状態の URL 反映と共有ダイアログ (replaceState は file:// では動かないため http で) ---
+  const html = fs.readFileSync(DIST);
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    res.end(html);
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const httpUrl = "http://127.0.0.1:" + server.address().port + "/";
+  {
+    const c = await browser.newContext({
+      viewport: VIEWPORT, timezoneId: "Asia/Tokyo",
+      geolocation: { latitude: 43.0621, longitude: 141.3544 }, permissions: ["geolocation"],
+    });
+    const p = await c.newPage();
+    p.on("pageerror", (e) => errors.push(String(e)));
+    await p.goto(httpUrl);
+    await p.waitForTimeout(800);
+    await p.click("#btn-settings");
+    await p.fill("#dtinput", "2026-08-10T21:30");
+    await p.dispatchEvent("#dtinput", "change");
+    await p.waitForTimeout(1400);   // URL 反映の間引き待ち
+    const url1 = p.url();
+    console.log("URL 反映 (手動入力):", url1);
+    for (const frag of ["t=2026-08-10T21:30%2B09:00", "lat=35.6895", "lon=139.6917", "view=2d"]) {
+      if (!url1.includes(frag)) errors.push(`URL に ${frag} が反映されていない: ${url1}`);
+    }
+
+    // 現在地を取得すると、以後 URL には緯度経度を載せない
+    await p.click("#btn-geo");
+    await p.waitForTimeout(1600);
+    const url2 = p.url();
+    console.log("URL 反映 (現在地取得後):", url2);
+    if (/lat=|lon=/.test(url2)) errors.push(`現在地が URL に載っている: ${url2}`);
+    const lat = await p.evaluate(() => window.__dbg.state.lat);
+    if (Math.abs(lat - 43.0621) > 1e-3) errors.push("現在地が観測地に反映されていない: " + lat);
+
+    // 共有ダイアログ: 注意書きが出て、既定では現在地を含めない
+    await p.click("#btn-share");
+    await p.waitForTimeout(300);
+    await p.screenshot({ path: "/tmp/ft_share_geo.png" });
+    const share = await p.evaluate(() => ({
+      warn: !document.getElementById("share-warn").classList.contains("hidden"),
+      checked: document.getElementById("share-loc").checked,
+      url: document.getElementById("shareurl").value,
+    }));
+    console.log("共有ダイアログ (現在地):", JSON.stringify(share));
+    if (!share.warn) errors.push("現在地利用時に共有ダイアログの注意書きが出ていない");
+    if (share.checked) errors.push("現在地利用時に既定で緯度経度が含まれている");
+    if (/lat=|lon=/.test(share.url)) errors.push("共有 URL に現在地が含まれている: " + share.url);
+    // 同意すれば含められる
+    await p.check("#share-loc");
+    await p.waitForTimeout(200);
+    const withLoc = await p.inputValue("#shareurl");
+    if (!withLoc.includes("lat=43.0621")) errors.push("同意しても共有 URL に緯度経度が入らない: " + withLoc);
+    await p.click("#share-close");
+    await c.close();
+  }
+  await new Promise((r) => server.close(r));
 
   console.log("console errors:", errors.length ? errors : "(none)");
   await browser.close();
