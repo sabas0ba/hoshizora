@@ -22,17 +22,22 @@ const LOCATION = { lat: 35.6895, lon: 139.6917 };
 const DATETIME = "2026-08-10T21:30";
 const START = new Date("2026-08-10T21:30:00+09:00");
 
-// README の表示幅に収まる横長。星座名が読める大きさを優先している。
-const VIEW = { width: 900, height: 600 };
+// 横長で、星座名が読める大きさと 600 KB 以内という条件の折り合い。
+// 等倍で撮って縮小はしない。縮小のアンチエイリアスで星がぼやけると
+// コマ間の差分が増え、GIF が大きくなるため。
+const VIEW = { width: 700, height: 470 };
 
-const FRAME_MS = 180; // GIF の 1 フレームあたりの表示時間
 const RENDER_MS = 60; // 描画のためだけに進める仮想時間
 
-// 再生の速さ。ページ内の時間は仮想クロックで進めるため、GIF 上の見かけの
-// 速さは PLAY_MS / FRAME_MS * 速度で決まる。×600 を 1 フレームあたり 300 ms
-// 進めるので、およそ 1000 倍速で空が動いて見える。
+// フレームごとの表示時間 [ms]。GIF の容量はほぼコマ数で決まるため、
+// 動きのないところはコマを増やさず 1 コマを長く表示して尺を稼ぐ。
+const MS = { still: 900, move: 200, press: 250, drag: 170, play: 300 };
+
+// 再生の速さ。ページ内の時間は仮想クロックで進めるので、GIF 上の見かけの
+// 速さは PLAY_STEP_MS / MS.play * 速度で決まる。×600 の空を 1 コマあたり
+// 500 ms 進めて 300 ms で見せるため、ちょうど 1000 倍速になる。
 const SPEED = "600";
-const PLAY_MS = 300;
+const PLAY_STEP_MS = 500;
 
 // 実際のポインタは撮影されないため、操作位置を示す疑似カーソルを重ねる。
 const CURSOR_CSS = `
@@ -73,11 +78,16 @@ async function tick(page, ms) {
 }
 
 const frames = [];
-async function shot(page, dir, times = 1, ms = RENDER_MS) {
-  await tick(page, ms);
+async function shot(page, dir, ms = MS.move, tickMs = RENDER_MS) {
+  await tick(page, tickMs);
   const file = path.join(dir, String(frames.length).padStart(3, "0") + ".png");
   await page.screenshot({ path: file });
-  for (let i = 0; i < times; i++) frames.push(file);
+  frames.push({ file: file, ms: ms });
+}
+
+// 直前のフレームの表示を伸ばす。コマは増えないので容量に響かない。
+function hold(ms) {
+  frames[frames.length - 1].ms += ms;
 }
 
 async function center(page, selector) {
@@ -87,13 +97,10 @@ async function center(page, selector) {
 
 // カーソルを現在地から目標へ数フレームかけて動かす。
 let pos = { x: VIEW.width / 2, y: VIEW.height - 40 };
-async function moveTo(page, dir, to, steps = 3) {
-  for (let i = 1; i <= steps; i++) {
-    const x = pos.x + (to.x - pos.x) * (i / steps);
-    const y = pos.y + (to.y - pos.y) * (i / steps);
-    await cursor(page, { x, y, show: true });
-    await shot(page, dir);
-  }
+async function moveTo(page, dir, to) {
+  if (Math.hypot(to.x - pos.x, to.y - pos.y) < 5) return;
+  await cursor(page, { x: to.x, y: to.y, show: true });
+  await shot(page, dir, MS.move);
   pos = to;
 }
 
@@ -101,7 +108,7 @@ async function tap(page, dir, selector) {
   const to = await center(page, selector);
   await moveTo(page, dir, to);
   await cursor(page, { press: true });
-  await shot(page, dir, 2);
+  await shot(page, dir, MS.press);
   await page.click(selector);
   await cursor(page, { press: false });
 }
@@ -117,7 +124,7 @@ async function drag(page, dir, from, to, steps) {
     const y = from.y + (to.y - from.y) * (i / steps);
     await page.mouse.move(x, y);
     await cursor(page, { x, y });
-    await shot(page, dir);
+    await shot(page, dir, MS.drag);
   }
   await page.mouse.up();
   await cursor(page, { press: false });
@@ -127,9 +134,9 @@ async function drag(page, dir, from, to, steps) {
 // 再生 (▶) を押し、日周運動が進む様子を frames 枚撮ってから停止する。
 async function play(page, dir, count) {
   await tap(page, dir, "#btn-play");
-  for (let i = 0; i < count; i++) await shot(page, dir, 1, PLAY_MS);
+  for (let i = 0; i < count; i++) await shot(page, dir, MS.play, PLAY_STEP_MS);
   const label = (await page.textContent("#timelabel")).trim();
-  console.log(`再生 ${count} フレーム (×${SPEED}, ${PLAY_MS} ms/フレーム) -> ${label}`);
+  console.log(`再生 ${count} コマ (×${SPEED}, 1 コマ ${PLAY_STEP_MS} ms) -> ${label}`);
   await tap(page, dir, "#btn-play");
 }
 
@@ -146,7 +153,7 @@ async function openPanel(page, fn) {
   const browser = await chromium.launch();
   const ctx = await browser.newContext({
     viewport: VIEW,
-    deviceScaleFactor: 2,
+    deviceScaleFactor: 1,
     timezoneId: "Asia/Tokyo",
   });
   const page = await ctx.newPage();
@@ -177,30 +184,22 @@ async function openPanel(page, fn) {
   await setupCursor(page);
 
   // 1. 2D 星座早見。再生すると全天が日周運動で回る
-  await shot(page, dir, 4);
-  await play(page, dir, 10);
-  await shot(page, dir, 3);
+  await shot(page, dir, MS.still);
+  await play(page, dir, 3);
+  hold(700);
 
   // 2. 3D へ切り替える
   await tap(page, dir, "#btn-3d");
-  await shot(page, dir, 2, 500);
-  await shot(page, dir, 3, 600);
+  await shot(page, dir, MS.still, 1200);
 
-  // 3. 3D をドラッグして見回す (視線を上げてから天の川に沿って横に振る)
-  await drag(page, dir, { x: 450, y: 240 }, { x: 450, y: 420 }, 5);
-  await shot(page, dir, 2);
-  await drag(page, dir, { x: 700, y: 330 }, { x: 200, y: 330 }, 8);
-  await shot(page, dir, 3);
+  // 3. 3D をドラッグして見回す。斜めに引いて、視線を上げながら
+  //    天の川に沿って横へ振る (縦と横で 2 回引くよりコマ数を減らせる)
+  await drag(page, dir, { x: 560, y: 200 }, { x: 160, y: 340 }, 4);
+  hold(700);
 
-  // 4. 3D でも再生して、星が地平線へ沈んでいくところを見せる
-  await play(page, dir, 10);
-  await shot(page, dir, 3);
-
-  // 5. 2D へ戻して終わる
-  await tap(page, dir, "#btn-2d");
-  await shot(page, dir, 1, 700);
-  await cursor(page, { show: false });
-  await shot(page, dir, 5);
+  // 4. 3D でも再生して、空全体が動くところを見せる
+  await play(page, dir, 3);
+  hold(900);
 
   await browser.close();
   if (errors.length) {
@@ -209,12 +208,10 @@ async function openPanel(page, fn) {
   }
 
   const list = path.join(dir, "frames.txt");
-  fs.writeFileSync(list, frames.join("\n") + "\n");
-  execFileSync(
-    "python3",
-    [path.join(__dirname, "frames_to_gif.py"), list, OUT, String(FRAME_MS)],
-    { stdio: "inherit" },
-  );
+  fs.writeFileSync(list, frames.map((f) => f.file + "\t" + f.ms).join("\n") + "\n");
+  execFileSync("python3", [path.join(__dirname, "frames_to_gif.py"), list, OUT], {
+    stdio: "inherit",
+  });
   fs.rmSync(dir, { recursive: true, force: true });
   console.log(`${path.relative(ROOT, OUT)}: ${(fs.statSync(OUT).size / 1024).toFixed(0)} KB`);
 })();
