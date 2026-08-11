@@ -13,6 +13,8 @@
 
 **デモ: <https://sabas0ba.github.io/hoshizora/>**
 
+![2D 星座早見での再生 (×600)、3D プラネタリウムへの切り替え、ドラッグでの視点移動](docs/preview.gif)
+
 | 2D 星座早見 | 3D プラネタリウム | 天体検索 | 昼間の空 |
 |---|---|---|---|
 | ![2D 全天図](docs/images/2d-allsky.png) | ![3D ビュー](docs/images/3d-planetarium.png) | ![検索](docs/images/search.png) | ![昼間](docs/images/2d-daylight.png) |
@@ -104,6 +106,13 @@ node tools/screenshot_test.js   # 2D/3D の表示とコンソールエラー
 node tools/feature_test.js      # 検索と方位センサー (合成センサーイベント)
 ```
 
+README 用の画像を撮り直す場合 (生成物はリポジトリにコミットします):
+
+```sh
+node tools/make_screenshots.js   # docs/images/*.png (減色に ImageMagick が必要)
+node tools/make_preview_gif.js   # docs/preview.gif (GIF 合成に Python の Pillow が必要)
+```
+
 上流データの再取得と検証:
 
 ```sh
@@ -123,6 +132,7 @@ data/               同梱データ (出典と条件は data/README.md)
 vendor/             three.js r147, satellite.js 4.1.4 (バージョン固定)
 tools/              ビルドと検証のスクリプト
 docs/images/        README 用スクリーンショット
+docs/preview.gif    README 用プレビュー GIF (2D → 3D の操作)
 ```
 
 生成物 `dist/` はリポジトリに含めません。GitHub Actions がビルドし Pages へ配信します。
