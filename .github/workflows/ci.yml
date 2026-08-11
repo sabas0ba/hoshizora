@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ビルド
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+
+      - name: 同梱データのハッシュを照合する
+        run: tools/fetch_sources.sh --verify
+
+      - name: 単一 HTML を生成する
+        run: |
+          python3 tools/build_data.py
+          python3 tools/build_html.py
+
+      - name: 生成物を検査する
+        run: python3 tools/check_dist.py
+
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: hoshizora-html
+          path: dist/hoshizora.html
+          if-no-files-found: error
+
+  test:
+    name: ブラウザ動作確認
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+
+      - name: 単一 HTML を生成する
+        run: |
+          python3 tools/build_data.py
+          python3 tools/build_html.py
+
+      # package.json でバージョンを固定している。lockfile がある場合は npm ci を使う。
+      - name: Playwright を導入する
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm install --no-audit --no-fund; fi
+          npx playwright install --with-deps chromium
+
+      - name: 表示を確認する
+        run: node tools/screenshot_test.js
+
+      - name: 検索と方位センサーを確認する
+        run: node tools/feature_test.js
+
+      - name: 失敗時のスクリーンショットを収集する
+        if: failure()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: failure-screenshots
+          path: /tmp/*.png
+          if-no-files-found: ignore

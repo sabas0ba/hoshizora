@@ -1,0 +1,33 @@
+hoshizora
+Copyright 2026 sabas0ba
+
+This product includes software developed by sabas0ba, licensed under the
+Apache License, Version 2.0 (see LICENSE).
+
+This product bundles third-party software and data that are licensed under
+their own terms. In particular, the generated single-file build
+(dist/hoshizora.html) embeds star catalog data derived from the HYG Database,
+which is licensed under Creative Commons Attribution-ShareAlike 4.0
+International (CC BY-SA 4.0). Redistribution of that data, including as part
+of the generated file, remains subject to CC BY-SA 4.0.
+
+A complete list of bundled components, their copyright holders and license
+terms is provided in THIRD-PARTY-NOTICES.md.
+
+---
+
+hoshizora
+Copyright 2026 sabas0ba
+
+本製品には Apache License, Version 2.0 (LICENSE を参照) の下で提供される
+sabas0ba によるソフトウェアが含まれます。
+
+本製品には、それぞれ独自の条件で提供される第三者のソフトウェアおよびデータが
+同梱されます。特に、生成される単一ファイル (dist/hoshizora.html) には
+HYG Database に由来する恒星カタログデータが埋め込まれており、これは
+Creative Commons 表示 - 継承 4.0 国際 (CC BY-SA 4.0) の下で提供されます。
+生成ファイルの一部としての再配布を含め、当該データの再配布には引き続き
+CC BY-SA 4.0 が適用されます。
+
+同梱物の一覧、著作権者およびライセンス条件は THIRD-PARTY-NOTICES.md に
+記載しています。

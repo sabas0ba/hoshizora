@@ -140,6 +140,7 @@ body {
 .tg { display: flex; align-items: center; gap: 7px; padding: 5px 0; cursor: pointer; font-size: 13px; }
 .tg input { accent-color: var(--accent); width: 16px; height: 16px; }
 #panel .note { font-size: 11px; color: var(--text-dim); line-height: 1.6; margin-top: 4px; }
+#panel .note a { color: var(--accent); }
 
 /* ---- タイムバー ---- */
 #timebar {

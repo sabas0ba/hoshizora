@@ -2,13 +2,15 @@
 """埋め込み用データ生成スクリプト。
 
 入力 (data/):
-  hygdata_v41.csv           HYG v4.1 星表 (CC BY-SA 4.0)
+  hyg_v41_mag6.csv          HYG v4.1 の 6 等以下抽出版 (CC BY-SA 4.0)
   constellations.lines.json d3-celestial 星座線 (BSD-3)
   constellations.json       d3-celestial 星座名・ラベル位置 (BSD-3)
   milkyway.json             d3-celestial 天の川輪郭 (BSD-3)
-  stations.tle, science.tle CelesTrak TLE スナップショット
+  tle/*.tle                 CelesTrak TLE スナップショット
 
 出力 (build/embedded_data.js): グローバル PLANET_DATA を定義する JS。
+
+data/ の生成手順は tools/fetch_sources.sh を参照。
 """
 
 import csv
@@ -25,20 +27,18 @@ os.makedirs(OUT, exist_ok=True)
 
 
 def build_stars():
-    """HYG から mag<=MAG_LIMIT の恒星を抽出し平坦な整数配列に圧縮する。
+    """恒星を平坦な整数配列に圧縮する。
 
     形式: ra(deg*10000), dec(deg*10000), mag(*100), ci(B-V, *100, 欠損は 999)
     """
     flat = []
     names = []  # [index, name]
     count = 0
-    with open(os.path.join(DATA, "hygdata_v41.csv"), newline="") as f:
+    with open(os.path.join(DATA, "hyg_v41_mag6.csv"), newline="", encoding="utf-8") as f:
         for row in csv.DictReader(f):
-            if row["id"] == "0":  # 太陽エントリを除外
-                continue
             try:
                 mag = float(row["mag"])
-            except ValueError:
+            except (TypeError, ValueError):
                 continue
             if mag > MAG_LIMIT:
                 continue
@@ -139,7 +139,7 @@ def build_tles():
     }
     sats = []
     for fname in ("stations.tle", "science.tle"):
-        path = os.path.join(DATA, fname)
+        path = os.path.join(DATA, "tle", fname)
         if not os.path.exists(path):
             continue
         with open(path) as f:

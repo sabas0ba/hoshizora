@@ -1,73 +1,130 @@
-# 星空シミュレータ (hoshizora)
+# hoshizora
 
-日時と緯度経度を指定して星空を 2D 星座早見 / 3D プラネタリウム表示する
-単一ファイル HTML アプリケーション。オフラインで動作する。
+[![CI](https://github.com/sabas0ba/hoshizora/actions/workflows/ci.yml/badge.svg)](https://github.com/sabas0ba/hoshizora/actions/workflows/ci.yml)
+[![Deploy to GitHub Pages](https://github.com/sabas0ba/hoshizora/actions/workflows/pages.yml/badge.svg)](https://github.com/sabas0ba/hoshizora/actions/workflows/pages.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-## 成果物
+日時と緯度経度を指定して星空を表示する天体シミュレータ。
+2D 星座早見と 3D プラネタリウムを切り替えられ、時刻の連続変化、天体検索、
+端末の方位センサーとの連携に対応します。
 
-- `dist/hoshizora.html` — 配布物。ブラウザで開くだけで動作する (約 830 KB)。
+**単一の HTML ファイルとして動作します。** 外部リソースを一切参照しないため、
+ダウンロードすればオフラインでも利用できます。
 
-## 機能
+**デモ: <https://sabas0ba.github.io/hoshizora/>**
 
-- 2D: 天頂中心の全天図 (正距方位図法、北上・東左の星座早見盤形式)
-- 3D: three.js による地上からのドームビュー (ドラッグ視線移動、ピンチ/ホイール画角)
-- 日時入力・観測地入力 (都市プリセット / Geolocation)
-- タイムスライダー (基準日時 ±24h) と再生 (×1〜×86400)
-- 表示トグル: 星座線・星座名・恒星名・惑星・太陽/月・天の川・人工衛星・
-  方位グリッド・地面・大気 (昼夜による空の色と星の減光)
-- 天体タップで名称・等級・高度方位を表示
-- 人工衛星: ISS / CSS / HST (内蔵 TLE スナップショットを SGP4 で伝播)
-- 天体検索: 恒星 (和名エイリアス対応)・星座 (和名/略符)・惑星・太陽・月・衛星。
-  かな正規化つき部分一致。選択すると 2D はマーカー表示、3D は視線移動アニメーション、
-  画面外の場合は方向ガイド矢印を表示
-- 方位センサー連携 (3D): DeviceOrientation API で端末の向きに視線が追従。
-  iOS は requestPermission、Android は deviceorientationabsolute を使用。
-  センサー動作中の左右ドラッグで方位オフセット補正
+| 2D 星座早見 | 3D プラネタリウム | 天体検索 | 昼間の空 |
+|---|---|---|---|
+| ![2D 全天図](docs/images/2d-allsky.png) | ![3D ビュー](docs/images/3d-planetarium.png) | ![検索](docs/images/search.png) | ![昼間](docs/images/2d-daylight.png) |
 
-航空機の表示はリアルタイム ADS-B データが必要なため対象外とした。
+## 特徴
 
-## 構成
+- **2 種類のビュー**
+  - 2D: 天頂を中心とする正距方位図法の全天図。北を上、東を左に配置した星座早見盤の形式
+  - 3D: three.js による観測地点からのドームビュー
+- **時刻の操作**: 基準日時 ±24 時間のスライダーと再生 (×1 〜 ×86400)
+- **観測地の指定**: 緯度経度の直接入力、10 都市のプリセット、Geolocation API
+- **天体検索**: 恒星 (和名エイリアス対応)、星座 (和名・略符)、惑星、太陽、月、人工衛星。
+  かな正規化つきの部分一致で、選択すると 2D はマーカー、3D は視線が対象へ移動します。
+  画面外の対象には方向ガイドを表示します
+- **方位センサー連携** (3D): 端末を向けた方向の空を表示します。
+  iOS/Android のいずれにも対応し、方位のずれはドラッグで補正できます
+- **表示の切り替え**: 星座線、星座名、恒星名、惑星、太陽・月、天の川、人工衛星、
+  方位グリッド、地面、大気 (昼夜による空の色と星の減光)
+- **描画対象**: 6.0 等までの恒星 5,070 個、88 星座の星座線、天の川、
+  太陽・月 (満ち欠け)・惑星 7 個、人工衛星 3 基 (ISS・CSS・ハッブル) の軌跡と地球影判定
 
-```
-src/            アプリケーションソース
-  astro.js        天文計算 (Meeus 略算: 恒星時・太陽・月・惑星・大気差)
-  app.js          2D/3D 描画・UI
-  style.css       スタイル
-  index.template.html  埋め込みテンプレート
-tools/          ビルド・検証スクリプト
-  build_data.py       data/ から埋め込みデータ (build/embedded_data.js) を生成
-  build_html.py       単一 HTML (dist/hoshizora.html) を組み立て
-  screenshot_test.js  Playwright による表示確認
-  feature_test.js     検索・方位センサーの動作確認 (合成 DeviceOrientationEvent)
-data/           取得した元データ (git 管理外の大容量含む)
-vendor/         three.min.js r147, satellite.iife.js (v4.1.4 を bun でバンドル)
-build/, dist/   生成物
-```
+## 操作
+
+| 操作 | 2D | 3D |
+|---|---|---|
+| 視点移動 | 拡大中にドラッグ | ドラッグ |
+| 拡大・画角 | ピンチ / ホイール | ピンチ / ホイール |
+| 天体の情報 | タップ | タップ |
+
+ツールバーの 🔍 が検索、🧭 が方位センサー、⚙ が設定パネルです。
 
 ## ビルド
 
+生成に必要なのは Python 3 のみです。同梱データはすべてリポジトリに含まれており、
+ビルド時のネットワーク接続は不要です。
+
+```sh
+python3 tools/build_data.py   # data/ -> build/embedded_data.js
+python3 tools/build_html.py   # -> dist/hoshizora.html (と Pages 用 index.html)
+python3 tools/check_dist.py   # 生成物の静的検査
 ```
-python3 tools/build_data.py
-python3 tools/build_html.py
-node tools/screenshot_test.js   # 表示確認 (要 Playwright + Chromium)
+
+ブラウザでの動作確認には Node.js と Playwright が必要です。
+
+```sh
+npm install && npx playwright install --with-deps chromium
+node tools/screenshot_test.js   # 2D/3D の表示とコンソールエラー
+node tools/feature_test.js      # 検索と方位センサー (合成センサーイベント)
 ```
+
+上流データの再取得と検証:
+
+```sh
+tools/fetch_sources.sh --verify   # 同梱データのハッシュ照合
+tools/fetch_sources.sh            # 上流から再取得 (git, python3, bun が必要)
+```
+
+## リポジトリ構成
+
+```
+src/                アプリケーション本体
+  astro.js            天文計算 (恒星時、太陽、月、惑星、大気差)
+  app.js              2D/3D 描画、UI、検索、方位センサー
+  style.css           スタイル
+  index.template.html 埋め込み先テンプレート
+data/               同梱データ (出典と条件は data/README.md)
+vendor/             three.js r147, satellite.js 4.1.4 (バージョン固定)
+tools/              ビルドと検証のスクリプト
+docs/images/        README 用スクリーンショット
+```
+
+生成物 `dist/` はリポジトリに含めません。GitHub Actions がビルドし Pages へ配信します。
 
 ## 精度
 
-- 太陽: Meeus 低精度式 (〜0.01°)。Meeus 例 25.a で検証済
-- 月: Meeus ch.47 主要項 (〜0.3°) + 高度視差の簡易補正。Meeus 例 47.a で検証済
-- 惑星: Standish (JPL) 近似ケプラー要素 1800–2050 (数分角)
-- 恒星: HYG v4.1 の J2000 位置。歳差・固有運動は未補正 (±数百年で <1° 程度)
-- 衛星: TLE エポックから離れるほど誤差増大 (特に ISS は軌道維持で日単位でずれる)
+表示用途に必要な水準を狙った略算であり、観測計画や精密計算には適しません。
 
-## データ出典・ライセンス
+| 対象 | 手法 | 概ねの誤差 | 検証 |
+|---|---|---|---|
+| 太陽 | Meeus 第 25 章 (低精度) | 0.01° 未満 | Meeus 例 25.a と照合 |
+| 月 | Meeus 第 47 章 主要項 + 視差補正 | 0.3° 程度 | Meeus 例 47.a と照合 |
+| 惑星 | Standish (JPL) 近似ケプラー要素 | 数分角 (1800–2050 年) | — |
+| 恒星 | HYG v4.1 の J2000 位置 | 歳差・固有運動は未補正 | — |
+| 人工衛星 | SGP4 (satellite.js) | TLE 元期から離れるほど増大 | — |
 
-| データ | 出典 | ライセンス |
-|---|---|---|
-| 恒星 (〜6.0 等, 5070 星) | astronexus/HYG-Database v4.1 | CC BY-SA 4.0 |
-| 星座線・星座名・天の川輪郭 | ofrohn/d3-celestial | BSD-3-Clause |
-| 衛星 TLE | CelesTrak (astrion-tech/celestrak-mirror 経由, 2026-08-10 取得) | パブリック |
-| three.js r147 | mrdoob/three.js | MIT |
-| satellite.js 4.1.4 | shashwatak/satellite-js | MIT |
+## 既知の制限
 
-生成 HTML には上記の帰属表示を含む。
+- **恒星の位置は J2000 元期のまま**です。歳差を補正していないため、
+  現在から数百年離れた日時では 1° 程度ずれます。
+- **人工衛星の TLE はスナップショット**です。元期は設定パネルに表示されます。
+  とくに ISS は軌道維持を行うため、数日離れると位置が大きくずれます。
+  最新化するには `tools/fetch_sources.sh` を実行してください。
+- **航空機は表示しません。** リアルタイムの ADS-B データが必要であり、
+  オフラインで完結する単一ファイルという方針と両立しないためです。
+- **方位センサーは https 経由でのみ利用できる端末があります。**
+  `file://` で開いた場合に許可を取得できないことがあるため、
+  その場合は上記のデモ URL を利用してください。
+- 大気差、視差、光行差の扱いは簡略化しています。日食・月食の予報には使えません。
+
+## ライセンス
+
+自作コード (`src/`, `tools/`) は [Apache License 2.0](LICENSE) です。
+
+同梱するデータとライブラリにはそれぞれのライセンスが適用されます。
+とくに恒星カタログは HYG Database に由来し **CC BY-SA 4.0 の継承対象** であるため、
+生成物 `dist/hoshizora.html` を再配布する際は帰属表示と同一ライセンスでの提供が
+必要になります。詳細は [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) を参照してください。
+
+| 同梱物 | ライセンス |
+|---|---|
+| [HYG Database](https://github.com/astronexus/HYG-Database) v4.1 | CC BY-SA 4.0 |
+| [d3-celestial](https://github.com/ofrohn/d3-celestial) のデータ | BSD 3-Clause |
+| [CelesTrak](https://celestrak.org/) の TLE | 制限なし |
+| [three.js](https://github.com/mrdoob/three.js) r147 | MIT |
+| [satellite.js](https://github.com/shashwatak/satellite-js) 4.1.4 | MIT |
