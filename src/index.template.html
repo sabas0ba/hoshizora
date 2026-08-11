@@ -71,10 +71,10 @@
   <h3>共有</h3>
   <div class="btnrow"><button id="btn-share">この空の URL を作る</button></div>
   <p class="note">
-    表示中の日時・観測地・ビューは URL に反映されます
-    (<code>?t=</code> / <code>lat</code> / <code>lon</code> / <code>view</code>)。
-    都市プリセット以外の観測地 (現在地の取得・手入力) は URL に自動では載せません。
-    共有時に含めるかどうかを選べます。
+    表示中の日時とビューは URL に反映されます (<code>?t=</code> / <code>view</code>)。
+    観測地は都市プリセットのときだけ名前で反映され (<code>city</code>)、
+    それ以外の座標 (現在地の取得・手入力) はアドレスバーには出ません。
+    緯度経度を含む URL は、この共有ダイアログで選んだときだけ作られます。
   </p>
 
   <h3>表示</h3>
@@ -122,11 +122,11 @@
     <p class="note">表示中の日時・観測地・ビューを開く URL です。</p>
     <p class="note warn hidden" id="share-warn">
       観測地は都市プリセット以外の座標です (現在地の取得、または手入力)。
-      緯度経度を含めた URL は、その場所を渡した相手に伝えることになります。
-      自宅などの場合はご注意ください。含めない場合、受け取った相手には
-      既定の観測地 (東京) で表示されます。
+      含めると <b>緯度経度がそのまま URL に入り</b>、その場所を渡した相手に
+      伝えることになります。自宅などの場合はご注意ください。含めない場合、
+      受け取った相手には既定の観測地 (東京) で表示されます。
     </p>
-    <label class="tg"><input type="checkbox" id="share-loc">観測地の緯度経度を含める</label>
+    <label class="tg"><input type="checkbox" id="share-loc">観測地を URL に含める</label>
     <input id="shareurl" type="text" readonly spellcheck="false">
     <div class="btnrow">
       <button id="share-copy">URL をコピー</button>

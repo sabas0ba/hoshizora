@@ -142,7 +142,11 @@ async function openShare(page) {
       { t: Date.UTC(2026, 7, 11, 11, 0), lat: -33.8688, lon: 151.2093, view: "3d" }],
     ["+ が空白に化けた場合", "?t=2026-08-11T20:00+09:00",
       { t: Date.UTC(2026, 7, 11, 11, 0), lat: 35.6895, lon: 139.6917, view: "2d" }],
-    ["不正値は無視して既定へ", "?t=yesterday&lat=999&lon=abc&view=4d",
+    ["都市名", "?t=2026-08-11T20:00%2B09:00&city=NAHA",
+      { t: Date.UTC(2026, 7, 11, 11, 0), lat: 26.2124, lon: 127.6809, view: "2d" }],
+    ["都市名より緯度経度が優先", "?city=naha&lat=34.6937&lon=135.5023",
+      { t: Date.UTC(2026, 7, 11, 11, 0), lat: 34.6937, lon: 135.5023, view: "2d" }],
+    ["不正値は無視して既定へ", "?t=yesterday&lat=999&lon=abc&city=atlantis&view=4d",
       { t: Date.UTC(2026, 7, 11, 11, 0), lat: 35.6895, lon: 139.6917, view: "2d" }],
   ]) {
     const c = await browser.newContext({ viewport: VIEWPORT, timezoneId: "UTC" });
@@ -188,25 +192,29 @@ async function openShare(page) {
     await p.dispatchEvent("#dtinput", "change");
     await p.waitForTimeout(1400);   // URL 反映の間引き待ち
     const url1 = p.url();
-    console.log("URL 反映 (既定の観測地):", url1);
-    for (const frag of ["t=2026-08-10T21:30%2B09:00", "lat=35.6895", "lon=139.6917", "view=2d"]) {
+    console.log("URL 反映 (プリセット都市):", url1);
+    for (const frag of ["t=2026-08-10T21:30%2B09:00", "city=tokyo", "view=2d"]) {
       if (!url1.includes(frag)) errors.push(`URL に ${frag} が反映されていない: ${url1}`);
     }
+    if (/lat=|lon=/.test(url1)) errors.push(`アドレスバーに緯度経度が出ている: ${url1}`);
 
-    // 共有ダイアログ: プリセット都市なので注意書きは出さず、既定で含める
+    // 共有ダイアログ: プリセット都市なので注意書きは出さず、既定で含める (名前で)
     const preset = await openShare(p);
     console.log("共有ダイアログ (プリセット都市):", JSON.stringify(preset));
     if (preset.warn) errors.push("プリセット都市なのに共有ダイアログの注意書きが出ている");
-    if (!preset.checked) errors.push("プリセット都市なのに既定で緯度経度が含まれていない");
+    if (!preset.checked) errors.push("プリセット都市なのに既定で観測地が含まれていない");
+    if (!preset.url.includes("city=tokyo") || /lat=|lon=/.test(preset.url)) {
+      errors.push("プリセット都市の共有 URL が都市名になっていない: " + preset.url);
+    }
     await p.click("#share-close");
 
-    // 都市プリセット以外の座標は手入力でも URL に載せない
+    // 都市プリセット以外の座標は手入力でもアドレスバーに出さない
     await p.fill("#latinput", "35.1234");
     await p.dispatchEvent("#latinput", "change");
     await p.waitForTimeout(1600);
     const url2 = p.url();
     console.log("URL 反映 (手入力の座標):", url2);
-    if (/lat=|lon=/.test(url2)) errors.push(`手入力の座標が URL に載っている: ${url2}`);
+    if (/lat=|lon=|city=/.test(url2)) errors.push(`手入力の座標が URL に載っている: ${url2}`);
     const manual = await openShare(p);
     console.log("共有ダイアログ (手入力):", JSON.stringify(manual));
     if (!manual.warn) errors.push("手入力の座標で共有ダイアログの注意書きが出ていない");
@@ -217,14 +225,14 @@ async function openShare(page) {
     await p.fill("#latinput", "35.6895");
     await p.dispatchEvent("#latinput", "change");
     await p.waitForTimeout(1600);
-    if (!/lat=35.6895/.test(p.url())) errors.push(`都市の座標が URL に戻らない: ${p.url()}`);
+    if (!/city=tokyo/.test(p.url())) errors.push(`都市の座標が URL に戻らない: ${p.url()}`);
 
     // 現在地を取得した場合も同様に載せない
     await p.click("#btn-geo");
     await p.waitForTimeout(1600);
     const url3 = p.url();
     console.log("URL 反映 (現在地取得後):", url3);
-    if (/lat=|lon=/.test(url3)) errors.push(`現在地が URL に載っている: ${url3}`);
+    if (/lat=|lon=|city=/.test(url3)) errors.push(`現在地が URL に載っている: ${url3}`);
     const lat = await p.evaluate(() => window.__dbg.state.lat);
     if (Math.abs(lat - 43.0621) > 1e-3) errors.push("現在地が観測地に反映されていない: " + lat);
 
@@ -243,7 +251,9 @@ async function openShare(page) {
     await c.close();
   }
 
-  // --- URL で渡された座標は、プリセット外でもそのまま URL に残ること ---
+  // --- URL で渡された座標も、アドレスバーには残さないこと ---
+  // (受け取った側がダイアログを通らずに転送できてしまうのを防ぐ。
+  //  観測地としては反映され、共有ダイアログから作り直せる)
   {
     const c = await browser.newContext({ viewport: VIEWPORT, timezoneId: "Asia/Tokyo" });
     const p = await c.newPage();
@@ -251,10 +261,18 @@ async function openShare(page) {
     await p.goto(httpUrl + "?t=2026-08-10T21:30%2B09:00&lat=36.1043&lon=137.5537");
     await p.waitForTimeout(1600);
     const url = p.url();
-    console.log("URL 反映 (URL 指定の座標):", url);
-    if (!/lat=36.1043/.test(url) || !/lon=137.5537/.test(url)) {
-      errors.push(`URL で渡された座標が URL から消えている: ${url}`);
+    const st = await p.evaluate(() => [window.__dbg.state.lat, window.__dbg.state.lon]);
+    console.log("URL 反映 (URL 指定の座標):", url, JSON.stringify(st));
+    if (/lat=|lon=/.test(url)) errors.push(`URL 指定の座標がアドレスバーに残っている: ${url}`);
+    if (Math.abs(st[0] - 36.1043) > 1e-4 || Math.abs(st[1] - 137.5537) > 1e-4) {
+      errors.push("URL 指定の座標が観測地に反映されていない: " + JSON.stringify(st));
     }
+    const shared = await openShare(p);
+    if (!shared.warn) errors.push("URL 指定の座標で共有ダイアログの注意書きが出ていない");
+    await p.check("#share-loc");
+    await p.waitForTimeout(200);
+    const again = await p.inputValue("#shareurl");
+    if (!again.includes("lat=36.1043")) errors.push("共有 URL を作り直せない: " + again);
     await c.close();
   }
   await new Promise((r) => server.close(r));
