@@ -141,6 +141,29 @@ body {
 .tg input { accent-color: var(--accent); width: 16px; height: 16px; }
 #panel .note { font-size: 11px; color: var(--text-dim); line-height: 1.6; margin-top: 4px; }
 #panel .note a { color: var(--accent); }
+#panel .note code { color: var(--text); font-size: 11px; }
+
+/* ---- 共有ダイアログ ---- */
+#sharedlg {
+  position: absolute; inset: 0; z-index: 50; padding: 16px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(4, 6, 11, 0.66);
+}
+#sharedlg .dlg {
+  width: min(430px, 100%);
+  background: var(--panel); border: 1px solid var(--panel-border); border-radius: 10px;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.6); padding: 14px;
+}
+#sharedlg h3 { font-size: 14px; margin-bottom: 6px; }
+#sharedlg .note { font-size: 11px; color: var(--text-dim); line-height: 1.6; }
+#sharedlg .note.warn { color: var(--accent2); margin-top: 6px; }
+#sharedlg .tg { margin-top: 6px; }
+#shareurl {
+  width: 100%; margin: 8px 0 2px; background: #131826; color: var(--text);
+  border: 1px solid var(--panel-border); border-radius: 6px;
+  padding: 8px 10px; font-size: 12px;
+}
+#share-msg:empty { display: none; }
 
 /* ---- タイムバー ---- */
 #timebar {

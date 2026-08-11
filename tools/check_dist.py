@@ -23,6 +23,7 @@ REQUIRED_MARKERS = [
     ("3D キャンバス", 'id="canvas3d"'),
     ("検索 UI", 'id="searchbox"'),
     ("方位センサー UI", 'id="btn-gyro"'),
+    ("共有ダイアログ", 'id="sharedlg"'),
     ("タイムスライダー", 'id="timeslider"'),
     ("HYG の帰属表示", "HYG"),
     ("d3-celestial の帰属表示", "d3-celestial"),
