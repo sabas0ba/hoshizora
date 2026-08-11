@@ -8,7 +8,7 @@
   // ================= 状態 =================
   var state = {
     lat: 35.6895, lon: 139.6917,          // 東京
-    locFromGeo: false,                     // 観測地を GPS で取得したか (URL 共有の判断に使う)
+    locSource: "preset",                   // 観測地の由来 (URL 共有の判断に使う。下記 locIsPrivate)
     baseTime: Date.now(),                  // 基準日時 [ms] (下の initialBaseTime で確定)
     offsetMin: 0,                          // スライダーオフセット [min]
     view: "2d",
@@ -59,7 +59,16 @@
   })();
   if (urlInit.lat !== null) state.lat = urlInit.lat;
   if (urlInit.lon !== null) state.lon = urlInit.lon;
+  if (urlInit.lat !== null || urlInit.lon !== null) state.locSource = "url";
   if (urlInit.view) state.view = urlInit.view;
+
+  // 観測地を URL に載せてよいか。プリセット都市と、URL で渡された座標
+  // (すでにその URL に書かれている = 公開されている) は載せてよい。
+  // 現在地の取得と手入力の座標は、利用者自身の居場所である可能性があるため
+  // 自動では載せず、共有ダイアログで明示的に選ばせる。
+  function locIsPrivate() {
+    return state.locSource === "geo" || state.locSource === "manual";
+  }
 
   // 起動時の基準日時。昼間 (太陽高度が市民薄明より上) に開いた場合は星が
   // ほとんど見えないため、その日の 20:00 の空を初期表示にする。
@@ -1502,7 +1511,7 @@
       }
       return;
     }
-    var q = stateQuery(!state.locFromGeo);
+    var q = stateQuery(!locIsPrivate());
     urlSyncAt = performance.now();
     if (q === urlSyncQuery) return;
     urlSyncQuery = q;
@@ -1591,8 +1600,9 @@
     var la = parseFloat($("latinput").value), lo = parseFloat($("loninput").value);
     if (isFinite(la) && Math.abs(la) <= 90) state.lat = la;
     if (isFinite(lo) && Math.abs(lo) <= 180) state.lon = lo;
-    // 都市の座標そのものを打ち込んだ場合は、現在地としての扱いを解除してよい
-    if (syncCitySel()) state.locFromGeo = false;
+    // 手入力の座標は自宅などの可能性がある。都市の座標そのものを打ち込んだ
+    // 場合に限り、プリセットを選んだのと同じ扱いにする。
+    state.locSource = syncCitySel() ? "preset" : "manual";
     refresh();
   }
   $("latinput").addEventListener("change", onLoc);
@@ -1624,7 +1634,7 @@
     var p = PRESETS[this.value];
     if (!p) return;
     state.lat = p[1]; state.lon = p[2];
-    state.locFromGeo = false;   // 公開されている都市の座標なので共有してよい
+    state.locSource = "preset";   // 公開されている都市の座標なので共有してよい
     $("latinput").value = p[1]; $("loninput").value = p[2];
     refresh();
   });
@@ -1635,7 +1645,7 @@
       state.lon = Math.round(pos.coords.longitude * 10000) / 10000;
       // 以降この座標は「利用者の居場所」として扱う。手入力で微修正されても
       // 元が現在地であることに変わりはないため、都市を選び直すまで解除しない。
-      state.locFromGeo = true;
+      state.locSource = "geo";
       $("latinput").value = state.lat; $("loninput").value = state.lon;
       syncCitySel();
       refresh();
@@ -1647,9 +1657,9 @@
     $("shareurl").value = stateUrl($("share-loc").checked);
   }
   $("btn-share").addEventListener("click", function () {
-    var geo = state.locFromGeo;
-    $("share-warn").classList.toggle("hidden", !geo);
-    $("share-loc").checked = !geo;   // 現在地のときは既定で含めない
+    var priv = locIsPrivate();
+    $("share-warn").classList.toggle("hidden", !priv);
+    $("share-loc").checked = !priv;   // 現在地・手入力のときは既定で含めない
     $("share-msg").textContent = "";
     updateShareUrl();
     $("sharedlg").classList.remove("hidden");

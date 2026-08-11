@@ -8,6 +8,17 @@ const DIST = path.resolve(__dirname, "../dist/hoshizora.html");
 const FILE_URL = "file://" + DIST;
 const VIEWPORT = { width: 480, height: 900 };
 
+// 共有ダイアログを開き、注意書きの有無・既定のチェック状態・生成 URL を返す
+async function openShare(page) {
+  await page.click("#btn-share");
+  await page.waitForTimeout(300);
+  return page.evaluate(() => ({
+    warn: !document.getElementById("share-warn").classList.contains("hidden"),
+    checked: document.getElementById("share-loc").checked,
+    url: document.getElementById("shareurl").value,
+  }));
+}
+
 (async () => {
   const browser = await chromium.launch();
   const ctx = await browser.newContext({ viewport: { width: 480, height: 900 }, timezoneId: "Asia/Tokyo" });
@@ -177,39 +188,73 @@ const VIEWPORT = { width: 480, height: 900 };
     await p.dispatchEvent("#dtinput", "change");
     await p.waitForTimeout(1400);   // URL 反映の間引き待ち
     const url1 = p.url();
-    console.log("URL 反映 (手動入力):", url1);
+    console.log("URL 反映 (既定の観測地):", url1);
     for (const frag of ["t=2026-08-10T21:30%2B09:00", "lat=35.6895", "lon=139.6917", "view=2d"]) {
       if (!url1.includes(frag)) errors.push(`URL に ${frag} が反映されていない: ${url1}`);
     }
 
-    // 現在地を取得すると、以後 URL には緯度経度を載せない
-    await p.click("#btn-geo");
+    // 共有ダイアログ: プリセット都市なので注意書きは出さず、既定で含める
+    const preset = await openShare(p);
+    console.log("共有ダイアログ (プリセット都市):", JSON.stringify(preset));
+    if (preset.warn) errors.push("プリセット都市なのに共有ダイアログの注意書きが出ている");
+    if (!preset.checked) errors.push("プリセット都市なのに既定で緯度経度が含まれていない");
+    await p.click("#share-close");
+
+    // 都市プリセット以外の座標は手入力でも URL に載せない
+    await p.fill("#latinput", "35.1234");
+    await p.dispatchEvent("#latinput", "change");
     await p.waitForTimeout(1600);
     const url2 = p.url();
-    console.log("URL 反映 (現在地取得後):", url2);
-    if (/lat=|lon=/.test(url2)) errors.push(`現在地が URL に載っている: ${url2}`);
+    console.log("URL 反映 (手入力の座標):", url2);
+    if (/lat=|lon=/.test(url2)) errors.push(`手入力の座標が URL に載っている: ${url2}`);
+    const manual = await openShare(p);
+    console.log("共有ダイアログ (手入力):", JSON.stringify(manual));
+    if (!manual.warn) errors.push("手入力の座標で共有ダイアログの注意書きが出ていない");
+    if (manual.checked) errors.push("手入力の座標が既定で共有 URL に含まれている");
+    await p.click("#share-close");
+
+    // 都市そのものの座標を打ち込んだ場合はプリセット扱いに戻る
+    await p.fill("#latinput", "35.6895");
+    await p.dispatchEvent("#latinput", "change");
+    await p.waitForTimeout(1600);
+    if (!/lat=35.6895/.test(p.url())) errors.push(`都市の座標が URL に戻らない: ${p.url()}`);
+
+    // 現在地を取得した場合も同様に載せない
+    await p.click("#btn-geo");
+    await p.waitForTimeout(1600);
+    const url3 = p.url();
+    console.log("URL 反映 (現在地取得後):", url3);
+    if (/lat=|lon=/.test(url3)) errors.push(`現在地が URL に載っている: ${url3}`);
     const lat = await p.evaluate(() => window.__dbg.state.lat);
     if (Math.abs(lat - 43.0621) > 1e-3) errors.push("現在地が観測地に反映されていない: " + lat);
 
-    // 共有ダイアログ: 注意書きが出て、既定では現在地を含めない
-    await p.click("#btn-share");
-    await p.waitForTimeout(300);
+    const geo = await openShare(p);
     await p.screenshot({ path: "/tmp/ft_share_geo.png" });
-    const share = await p.evaluate(() => ({
-      warn: !document.getElementById("share-warn").classList.contains("hidden"),
-      checked: document.getElementById("share-loc").checked,
-      url: document.getElementById("shareurl").value,
-    }));
-    console.log("共有ダイアログ (現在地):", JSON.stringify(share));
-    if (!share.warn) errors.push("現在地利用時に共有ダイアログの注意書きが出ていない");
-    if (share.checked) errors.push("現在地利用時に既定で緯度経度が含まれている");
-    if (/lat=|lon=/.test(share.url)) errors.push("共有 URL に現在地が含まれている: " + share.url);
+    console.log("共有ダイアログ (現在地):", JSON.stringify(geo));
+    if (!geo.warn) errors.push("現在地利用時に共有ダイアログの注意書きが出ていない");
+    if (geo.checked) errors.push("現在地利用時に既定で緯度経度が含まれている");
+    if (/lat=|lon=/.test(geo.url)) errors.push("共有 URL に現在地が含まれている: " + geo.url);
     // 同意すれば含められる
     await p.check("#share-loc");
     await p.waitForTimeout(200);
     const withLoc = await p.inputValue("#shareurl");
     if (!withLoc.includes("lat=43.0621")) errors.push("同意しても共有 URL に緯度経度が入らない: " + withLoc);
     await p.click("#share-close");
+    await c.close();
+  }
+
+  // --- URL で渡された座標は、プリセット外でもそのまま URL に残ること ---
+  {
+    const c = await browser.newContext({ viewport: VIEWPORT, timezoneId: "Asia/Tokyo" });
+    const p = await c.newPage();
+    p.on("pageerror", (e) => errors.push(String(e)));
+    await p.goto(httpUrl + "?t=2026-08-10T21:30%2B09:00&lat=36.1043&lon=137.5537");
+    await p.waitForTimeout(1600);
+    const url = p.url();
+    console.log("URL 反映 (URL 指定の座標):", url);
+    if (!/lat=36.1043/.test(url) || !/lon=137.5537/.test(url)) {
+      errors.push(`URL で渡された座標が URL から消えている: ${url}`);
+    }
     await c.close();
   }
   await new Promise((r) => server.close(r));
